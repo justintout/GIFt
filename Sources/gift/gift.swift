@@ -28,6 +28,7 @@ struct Settings: Codable {
     var autoStartAfterSelection: Bool
     var defaultFPS: Int
     var indicatorStyle: IndicatorStyle
+    var hasCompletedInitialSetup: Bool
 
     static private let outputKey = "gift.outputDirectory"
     static private let autoStartKey = "gift.autoStartAfterSelection"
@@ -37,6 +38,7 @@ struct Settings: Codable {
     static private let indicatorBlueKey = "gift.indicator.blue"
     static private let indicatorOpacityKey = "gift.indicator.opacity"
     static private let indicatorBorderWidthKey = "gift.indicator.borderWidth"
+    static private let initialSetupKey = "gift.initialSetupComplete"
 
     static func load() -> Settings {
         let defaults = UserDefaults.standard
@@ -44,6 +46,7 @@ struct Settings: Codable {
         let url = defaults.url(forKey: outputKey) ?? defaultDir
         let auto = defaults.object(forKey: autoStartKey) as? Bool ?? true
         let fps = defaults.object(forKey: fpsKey) as? Int ?? 30
+        let hasCompletedInitialSetup = defaults.object(forKey: initialSetupKey) as? Bool ?? false
         let indicatorStyle = IndicatorStyle(
             red: defaults.cgFloat(forKey: indicatorRedKey) ?? IndicatorStyle.default.red,
             green: defaults.cgFloat(forKey: indicatorGreenKey) ?? IndicatorStyle.default.green,
@@ -51,7 +54,13 @@ struct Settings: Codable {
             fillOpacity: defaults.cgFloat(forKey: indicatorOpacityKey) ?? IndicatorStyle.default.fillOpacity,
             borderWidth: defaults.cgFloat(forKey: indicatorBorderWidthKey) ?? IndicatorStyle.default.borderWidth
         )
-        return Settings(outputDirectory: url, autoStartAfterSelection: auto, defaultFPS: fps, indicatorStyle: indicatorStyle)
+        return Settings(
+            outputDirectory: url,
+            autoStartAfterSelection: auto,
+            defaultFPS: fps,
+            indicatorStyle: indicatorStyle,
+            hasCompletedInitialSetup: hasCompletedInitialSetup
+        )
     }
 
     static func save(_ settings: Settings) {
@@ -59,6 +68,7 @@ struct Settings: Codable {
         defaults.set(settings.outputDirectory, forKey: outputKey)
         defaults.set(settings.autoStartAfterSelection, forKey: autoStartKey)
         defaults.set(settings.defaultFPS, forKey: fpsKey)
+        defaults.set(settings.hasCompletedInitialSetup, forKey: initialSetupKey)
         defaults.set(Double(settings.indicatorStyle.red), forKey: indicatorRedKey)
         defaults.set(Double(settings.indicatorStyle.green), forKey: indicatorGreenKey)
         defaults.set(Double(settings.indicatorStyle.blue), forKey: indicatorBlueKey)
@@ -107,7 +117,6 @@ final class GiftApp: NSObject, NSApplicationDelegate {
     private let indicatorWindow = SelectionIndicatorWindow()
     private var settings = Settings.load()
     private var settingsController: SettingsWindowController?
-    private var permissionController: PermissionOnboardingWindowController?
     private var processingIndicator: NSProgressIndicator?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -117,8 +126,8 @@ final class GiftApp: NSObject, NSApplicationDelegate {
         appLog.info("screen capture permission preflight = \(preflight, privacy: .public)")
         setupMenuBar()
         applySettings()
-        if !preflight {
-            showPermissionSetup()
+        if !settings.hasCompletedInitialSetup || !preflight {
+            showSettings(initialSetup: !settings.hasCompletedInitialSetup)
         }
         appLog.info("setup complete; status item is nil? \(self.statusItem == nil, privacy: .public)")
     }
@@ -231,8 +240,10 @@ final class GiftApp: NSObject, NSApplicationDelegate {
         startItem.isEnabled = false
         stopItem.isEnabled = false
         updateStatusIcon(.processing)
-        recorder.stop()
         EscTap.shared.disable()
+        DispatchQueue.main.async { [recorder] in
+            recorder.stop()
+        }
     }
 
     @objc func cancelRecording() {
@@ -284,6 +295,10 @@ final class GiftApp: NSObject, NSApplicationDelegate {
     }
 
     @objc private func openSettings() {
+        showSettings(initialSetup: !settings.hasCompletedInitialSetup)
+    }
+
+    private func showSettings(initialSetup: Bool, onPermissionGranted: (() -> Void)? = nil) {
         if settingsController == nil {
             settingsController = SettingsWindowController(settings: settings) { [weak self] newSettings in
                 guard let self else { return }
@@ -292,12 +307,11 @@ final class GiftApp: NSObject, NSApplicationDelegate {
                 self.applySettings()
             }
         }
-        settingsController?.showWindow(nil)
-        settingsController?.window?.makeKeyAndOrderFront(nil)
+        settingsController?.show(settings: settings, initialSetup: initialSetup, onPermissionGranted: onPermissionGranted)
     }
 
     @objc private func openPermissionSetup() {
-        showPermissionSetup()
+        showSettings(initialSetup: false)
     }
 
     @objc private func quit() {
@@ -306,15 +320,8 @@ final class GiftApp: NSObject, NSApplicationDelegate {
 
     private func ensureScreenRecordingAccess(onGranted: (() -> Void)? = nil) -> Bool {
         guard !CGPreflightScreenCaptureAccess() else { return true }
-        showPermissionSetup(onGranted: onGranted)
+        showSettings(initialSetup: false, onPermissionGranted: onGranted)
         return false
-    }
-
-    private func showPermissionSetup(onGranted: (() -> Void)? = nil) {
-        if permissionController == nil {
-            permissionController = PermissionOnboardingWindowController()
-        }
-        permissionController?.show(onPermissionGranted: onGranted)
     }
 
     private func updateStatusIcon(_ state: StatusIconState) {
@@ -471,22 +478,22 @@ final class Recorder: NSObject, SCStreamOutput {
         guard state == .recording else { return }
         state = .stopping
         let currentStream = stream
-        Task { @MainActor in
+        let fps = self.fps
+        let outputDirectory = self.outputDirectory
+        Task.detached(priority: .userInitiated) { [weak self] in
             do {
                 try await currentStream?.stopCapture()
             } catch {
-                finish(.failure(error))
+                self?.finishOnMain(.failure(error))
                 return
             }
-            guard completionHandler != nil else { return }
+            guard let self else { return }
             let capturedFrames = captureQueue.sync {
                 let capturedFrames = self.frames
                 self.frames.removeAll()
                 self.isCanceled = false
                 return capturedFrames
             }
-            let fps = self.fps
-            let outputDirectory = self.outputDirectory
             encodingQueue.async { [weak self] in
                 let result: Result<URL, Error>
                 do {
@@ -497,10 +504,7 @@ final class Recorder: NSObject, SCStreamOutput {
                 } catch {
                     result = .failure(error)
                 }
-                Task { @MainActor in
-                    guard let self, self.completionHandler != nil else { return }
-                    self.finish(result)
-                }
+                self?.finishOnMain(result)
             }
         }
     }
@@ -523,8 +527,7 @@ final class Recorder: NSObject, SCStreamOutput {
 
     private func beginCapture(selection: SelectionContext) async throws {
         // Ensure permission
-        let accessGranted = CGPreflightScreenCaptureAccess() || CGRequestScreenCaptureAccess()
-        guard accessGranted else { throw RecorderError.permissionDenied }
+        guard CGPreflightScreenCaptureAccess() else { throw RecorderError.permissionDenied }
 
         let content = try await SCShareableContent.current
         guard let display = content.displays.first(where: { $0.displayID == selection.displayID }) else {
@@ -610,6 +613,13 @@ final class Recorder: NSObject, SCStreamOutput {
         let completion = completionHandler
         completionHandler = nil
         completion?(result)
+    }
+
+    private func finishOnMain(_ result: Result<URL, Error>) {
+        Task { @MainActor [weak self] in
+            guard let self, self.completionHandler != nil else { return }
+            self.finish(result)
+        }
     }
 }
 
