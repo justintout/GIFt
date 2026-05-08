@@ -37,7 +37,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         window.delegate = self
         setupUI()
         apply(settings: settings)
-        refreshPermissionControls()
+        showUnknownPermissionStatus()
     }
 
     required init?(coder: NSCoder) {
@@ -49,7 +49,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         self.isInitialSetup = initialSetup
         self.onPermissionGranted = onPermissionGranted
         apply(settings: settings)
-        refreshPermissionControls()
+        showUnknownPermissionStatus()
         updateMode()
         window?.center()
         showWindow(nil)
@@ -246,6 +246,13 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         requestAccessButton.isHidden = hasAccess
         systemSettingsButton.isHidden = hasAccess
         checkAccessButton.isHidden = hasAccess
+    }
+
+    private func showUnknownPermissionStatus() {
+        permissionStatusLabel.stringValue = "Screen Recording access has not been checked yet."
+        requestAccessButton.isHidden = false
+        systemSettingsButton.isHidden = false
+        checkAccessButton.isHidden = false
     }
 
     @objc private func requestAccess() {

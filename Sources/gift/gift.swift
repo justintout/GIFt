@@ -38,7 +38,8 @@ struct Settings: Codable {
     static private let indicatorBlueKey = "gift.indicator.blue"
     static private let indicatorOpacityKey = "gift.indicator.opacity"
     static private let indicatorBorderWidthKey = "gift.indicator.borderWidth"
-    static private let initialSetupKey = "gift.initialSetupComplete"
+    static private let initialSetupVersionKey = "gift.initialSetupVersion"
+    static private let currentInitialSetupVersion = 1
 
     static func load() -> Settings {
         let defaults = UserDefaults.standard
@@ -46,7 +47,7 @@ struct Settings: Codable {
         let url = defaults.url(forKey: outputKey) ?? defaultDir
         let auto = defaults.object(forKey: autoStartKey) as? Bool ?? true
         let fps = defaults.object(forKey: fpsKey) as? Int ?? 30
-        let hasCompletedInitialSetup = defaults.object(forKey: initialSetupKey) as? Bool ?? false
+        let hasCompletedInitialSetup = defaults.integer(forKey: initialSetupVersionKey) >= currentInitialSetupVersion
         let indicatorStyle = IndicatorStyle(
             red: defaults.cgFloat(forKey: indicatorRedKey) ?? IndicatorStyle.default.red,
             green: defaults.cgFloat(forKey: indicatorGreenKey) ?? IndicatorStyle.default.green,
@@ -68,7 +69,9 @@ struct Settings: Codable {
         defaults.set(settings.outputDirectory, forKey: outputKey)
         defaults.set(settings.autoStartAfterSelection, forKey: autoStartKey)
         defaults.set(settings.defaultFPS, forKey: fpsKey)
-        defaults.set(settings.hasCompletedInitialSetup, forKey: initialSetupKey)
+        if settings.hasCompletedInitialSetup {
+            defaults.set(currentInitialSetupVersion, forKey: initialSetupVersionKey)
+        }
         defaults.set(Double(settings.indicatorStyle.red), forKey: indicatorRedKey)
         defaults.set(Double(settings.indicatorStyle.green), forKey: indicatorGreenKey)
         defaults.set(Double(settings.indicatorStyle.blue), forKey: indicatorBlueKey)
@@ -122,11 +125,9 @@ final class GiftApp: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         appLog.info("applicationDidFinishLaunching")
         NSApp.setActivationPolicy(.accessory) // Hide dock icon, show only menu bar item
-        let preflight = CGPreflightScreenCaptureAccess()
-        appLog.info("screen capture permission preflight = \(preflight, privacy: .public)")
         setupMenuBar()
         applySettings()
-        if !settings.hasCompletedInitialSetup || !preflight {
+        if !settings.hasCompletedInitialSetup {
             showSettings(initialSetup: !settings.hasCompletedInitialSetup)
         }
         appLog.info("setup complete; status item is nil? \(self.statusItem == nil, privacy: .public)")
