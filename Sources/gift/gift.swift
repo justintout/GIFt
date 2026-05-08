@@ -141,6 +141,10 @@ final class GiftApp: NSObject, NSApplicationDelegate {
         return true
     }
 
+    func applicationDidBecomeActive(_ notification: Notification) {
+        settingsController?.refreshPermissionStatus()
+    }
+
     static func main() {
         appLog.info("entering main")
         let app = NSApplication.shared

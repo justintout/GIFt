@@ -11,7 +11,6 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     private let permissionDetailLabel = NSTextField(wrappingLabelWithString: "")
     private let requestAccessButton = NSButton(title: "Grant Access", target: nil, action: nil)
     private let systemSettingsButton = NSButton(title: "System Settings", target: nil, action: nil)
-    private let checkAccessButton = NSButton(title: "Check Again", target: nil, action: nil)
     private let pathField = NSTextField()
     private let autoStartCheckbox = NSButton(checkboxWithTitle: "Start recording immediately after selecting an area", target: nil, action: nil)
     private let fpsPopup = NSPopUpButton()
@@ -59,6 +58,16 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         showWindow(nil)
         window?.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
+        DispatchQueue.main.async { [weak self] in
+            self?.refreshPermissionStatus()
+        }
+    }
+
+    func refreshPermissionStatus() {
+        let hasAccess = updatePermissionControls()
+        if hasAccess, onPermissionGranted != nil {
+            finishPermissionGranted()
+        }
     }
 
     private func setupUI() {
@@ -99,12 +108,9 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         requestAccessButton.action = #selector(requestAccess)
         systemSettingsButton.target = self
         systemSettingsButton.action = #selector(openScreenRecordingSettings)
-        checkAccessButton.target = self
-        checkAccessButton.action = #selector(checkAgain)
 
         permissionButtonRow.addArrangedSubview(requestAccessButton)
         permissionButtonRow.addArrangedSubview(systemSettingsButton)
-        permissionButtonRow.addArrangedSubview(checkAccessButton)
         stack.addArrangedSubview(permissionButtonRow)
 
         let outputLabel = NSTextField(labelWithString: "Recording")
@@ -244,25 +250,25 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         updateIndicatorLabels()
     }
 
-    private func refreshPermissionControls() {
+    @discardableResult
+    private func updatePermissionControls() -> Bool {
         let hasAccess = CGPreflightScreenCaptureAccess()
         permissionStatusLabel.stringValue = hasAccess ? "Screen Recording access is enabled." : "Screen Recording access is not enabled yet."
         requestAccessButton.isHidden = hasAccess
         systemSettingsButton.isHidden = hasAccess
-        checkAccessButton.isHidden = hasAccess
+        return hasAccess
     }
 
     private func showUnknownPermissionStatus() {
         permissionStatusLabel.stringValue = "Screen Recording access has not been checked yet."
         requestAccessButton.isHidden = false
         systemSettingsButton.isHidden = false
-        checkAccessButton.isHidden = false
     }
 
     @objc private func requestAccess() {
-        updateSettingsFromControls(completeInitialSetup: false)
+        updateSettingsFromControls(completeInitialSetup: true)
         onSave(settings)
-        if CGPreflightScreenCaptureAccess() {
+        if updatePermissionControls() {
             finishPermissionGranted()
             return
         }
@@ -276,7 +282,11 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
             }
         } else {
             cancelRelaunchWatcher()
-            refreshPermissionControls()
+            if isInitialSetup {
+                settings.hasCompletedInitialSetup = false
+                onSave(settings)
+            }
+            updatePermissionControls()
         }
     }
 
@@ -284,14 +294,6 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         let settingsURL = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")!
         if !NSWorkspace.shared.open(settingsURL) {
             NSWorkspace.shared.open(URL(fileURLWithPath: "/System/Applications/System Settings.app"))
-        }
-    }
-
-    @objc private func checkAgain() {
-        if CGPreflightScreenCaptureAccess() {
-            finishPermissionGranted()
-        } else {
-            refreshPermissionControls()
         }
     }
 
@@ -342,7 +344,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     }
 
     private func finishPermissionGranted() {
-        refreshPermissionControls()
+        updatePermissionControls()
         let callback = onPermissionGranted
         onPermissionGranted = nil
         if callback != nil {
