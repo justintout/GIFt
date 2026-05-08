@@ -284,7 +284,7 @@ final class GiftApp: NSObject, NSApplicationDelegate {
         SelectionOverlay.present { [weak self] result in
             guard let result else { return }
             guard let self else { return }
-            appLog.info("selection returned rect \(String(describing: result.rect), privacy: .public) on display \(result.screen.displayID, privacy: .public)")
+            appLog.info("selection returned rect \(String(describing: result.rect), privacy: .private) on display \(result.screen.displayID, privacy: .private)")
             do {
                 let selectedRect = try self.recorder.setSelection(rect: result.rect, on: result.screen, excludedWindowID: self.indicatorWindow.windowID)
                 self.indicatorWindow.show(rect: selectedRect, recording: false)
@@ -530,7 +530,7 @@ final class Recorder: NSObject, SCStreamOutput {
                         maximumPixelDimension: self?.maximumPixelDimension(for: fps) ?? 1280
                     )
                     let elapsed = Date().timeIntervalSince(startedAt)
-                    captureLog.info("wrote GIF with \(capturedFrames.count, privacy: .public) captured frames to \(url.path, privacy: .public) in \(elapsed, privacy: .public)s")
+                    captureLog.info("wrote GIF with \(capturedFrames.count, privacy: .public) captured frames to \(url.path, privacy: .private) in \(elapsed, privacy: .public)s")
                     result = .success(url)
                 } catch {
                     result = .failure(error)
@@ -603,7 +603,7 @@ final class Recorder: NSObject, SCStreamOutput {
 
         let stream = SCStream(filter: filter, configuration: config, delegate: self)
         try stream.addStreamOutput(self, type: .screen, sampleHandlerQueue: captureQueue)
-        captureLog.info("starting capture on display \(selection.displayID, privacy: .public) source \(String(describing: geometry.sourceRect), privacy: .public) output \(geometry.outputWidth, privacy: .public)x\(geometry.outputHeight, privacy: .public) scale \(scale, privacy: .public) fps \(self.fps, privacy: .public)")
+        captureLog.info("starting capture on display \(selection.displayID, privacy: .private) source \(String(describing: geometry.sourceRect), privacy: .private) output \(geometry.outputWidth, privacy: .public)x\(geometry.outputHeight, privacy: .public) scale \(scale, privacy: .public) fps \(self.fps, privacy: .public)")
         try await stream.startCapture()
         guard state == .starting else {
             try? await stream.stopCapture()
@@ -677,7 +677,7 @@ final class Recorder: NSObject, SCStreamOutput {
 extension Recorder: SCStreamDelegate {
     func stream(_ stream: SCStream, didStopWithError error: Error) {
         Task { @MainActor in
-            captureLog.error("stream stopped with error: \(String(describing: error), privacy: .public)")
+            captureLog.error("stream stopped with error: \(String(describing: error), privacy: .private)")
             captureQueue.sync {
                 self.frames.removeAll()
                 self.isCanceled = false
@@ -726,7 +726,7 @@ final class GIFPreviewController: NSObject, @preconcurrency QLPreviewPanelDataSo
         do {
             try process.run()
         } catch {
-            appLog.error("failed to open Quick Look preview: \(String(describing: error), privacy: .public)")
+            appLog.error("failed to open Quick Look preview: \(String(describing: error), privacy: .private)")
         }
     }
 }

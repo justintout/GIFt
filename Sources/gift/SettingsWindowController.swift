@@ -379,7 +379,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
             relaunchWatcher = process
             return true
         } catch {
-            settingsLog.error("failed to start relaunch watcher: \(String(describing: error), privacy: .public)")
+            settingsLog.error("failed to start relaunch watcher: \(String(describing: error), privacy: .private)")
             return false
         }
     }
