@@ -24,7 +24,7 @@ struct SelectionContext: @unchecked Sendable {
 }
 
 struct Settings: Codable {
-    static let allowedFrameRates = [8, 10, 12, 15]
+    static let allowedFrameRates = [8, 10, 12, 15, 24, 30]
     static let defaultFrameRate = 12
 
     var outputDirectory: URL
@@ -436,8 +436,8 @@ final class Recorder: NSObject, SCStreamOutput {
     enum State { case idle, starting, recording, stopping }
 
     private(set) var state: State = .idle
-    private let maximumGIFFrameRate = 15
-    private let maximumGIFPixelDimension = 1280
+    private let standardGIFPixelDimension = 1280
+    private let highFrameRateGIFPixelDimension = 960
     var fps: Int = Settings.defaultFrameRate
     var hasSelection: Bool { selection != nil }
 
@@ -526,8 +526,8 @@ final class Recorder: NSObject, SCStreamOutput {
                         frames: gifFrames,
                         fps: fps,
                         outputDirectory: outputDirectory,
-                        maximumFrameRate: self?.maximumGIFFrameRate ?? 15,
-                        maximumPixelDimension: self?.maximumGIFPixelDimension ?? 1280
+                        maximumFrameRate: fps,
+                        maximumPixelDimension: self?.maximumPixelDimension(for: fps) ?? 1280
                     )
                     let elapsed = Date().timeIntervalSince(startedAt)
                     captureLog.info("wrote GIF with \(capturedFrames.count, privacy: .public) captured frames to \(url.path, privacy: .public) in \(elapsed, privacy: .public)s")
@@ -641,8 +641,7 @@ final class Recorder: NSObject, SCStreamOutput {
     }
 
     private func shouldStoreFrame(at timestamp: CMTime) -> Bool {
-        let targetFrameRate = min(maximumGIFFrameRate, max(fps, 1))
-        let minimumInterval = 1.0 / Double(targetFrameRate)
+        let minimumInterval = 1.0 / Double(max(fps, 1))
         guard let lastStoredFrameTimestamp else {
             self.lastStoredFrameTimestamp = timestamp
             return true
@@ -652,6 +651,10 @@ final class Recorder: NSObject, SCStreamOutput {
         guard elapsed.isFinite, elapsed >= minimumInterval else { return false }
         self.lastStoredFrameTimestamp = timestamp
         return true
+    }
+
+    private func maximumPixelDimension(for fps: Int) -> Int {
+        fps >= 24 ? highFrameRateGIFPixelDimension : standardGIFPixelDimension
     }
 
     private func finish(_ result: Result<URL, Error>) {
