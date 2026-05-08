@@ -418,6 +418,7 @@ final class Recorder: NSObject, SCStreamOutput {
 
     private var selection: SelectionContext?
     private let captureQueue = DispatchQueue(label: "gift.capture", qos: .userInteractive)
+    private let encodingQueue = DispatchQueue(label: "gift.encoding", qos: .userInitiated)
     private let renderContext = CIContext(options: [.useSoftwareRenderer: false])
     private var frames: [(CGImage, CMTime)] = []
     private var stream: SCStream?
@@ -484,11 +485,22 @@ final class Recorder: NSObject, SCStreamOutput {
                 self.isCanceled = false
                 return capturedFrames
             }
-            do {
-                let url = try writeGIF(frames: capturedFrames)
-                finish(.success(url))
-            } catch {
-                finish(.failure(error))
+            let fps = self.fps
+            let outputDirectory = self.outputDirectory
+            encodingQueue.async { [weak self] in
+                let result: Result<URL, Error>
+                do {
+                    let gifFrames = capturedFrames.map { GIFFrame(image: $0.0, timestamp: $0.1) }
+                    let url = try GIFWriter.write(frames: gifFrames, fps: fps, outputDirectory: outputDirectory)
+                    captureLog.info("wrote GIF with \(capturedFrames.count, privacy: .public) frames to \(url.path, privacy: .public)")
+                    result = .success(url)
+                } catch {
+                    result = .failure(error)
+                }
+                Task { @MainActor in
+                    guard let self, self.completionHandler != nil else { return }
+                    self.finish(result)
+                }
             }
         }
     }
@@ -592,15 +604,6 @@ final class Recorder: NSObject, SCStreamOutput {
         }
     }
 
-    // MARK: GIF Writing
-
-    private func writeGIF(frames: [(CGImage, CMTime)]) throws -> URL {
-        let gifFrames = frames.map { GIFFrame(image: $0.0, timestamp: $0.1) }
-        let url = try GIFWriter.write(frames: gifFrames, fps: fps, outputDirectory: outputDirectory)
-        captureLog.info("wrote GIF with \(frames.count, privacy: .public) frames to \(url.path, privacy: .public)")
-        return url
-    }
-
     private func finish(_ result: Result<URL, Error>) {
         stream = nil
         state = .idle
@@ -635,7 +638,8 @@ final class GIFPreviewController: NSObject, @preconcurrency QLPreviewPanelDataSo
         NSApp.activate(ignoringOtherApps: true)
 
         guard let panel = QLPreviewPanel.shared() else {
-            NSWorkspace.shared.open(url)
+            // Avoid NSWorkspace.open(url): LaunchServices may route GIFs to Preview.
+            openWithQuickLook(url: url)
             return
         }
         panel.dataSource = self
@@ -650,6 +654,20 @@ final class GIFPreviewController: NSObject, @preconcurrency QLPreviewPanelDataSo
 
     func previewPanel(_ panel: QLPreviewPanel!, previewItemAt index: Int) -> QLPreviewItem! {
         previewURL
+    }
+
+    private func openWithQuickLook(url: URL) {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/qlmanage")
+        process.arguments = ["-p", url.path]
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+
+        do {
+            try process.run()
+        } catch {
+            appLog.error("failed to open Quick Look preview: \(String(describing: error), privacy: .public)")
+        }
     }
 }
 
