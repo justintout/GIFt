@@ -20,10 +20,16 @@ struct Settings: Codable {
     var outputDirectory: URL
     var autoStartAfterSelection: Bool
     var defaultFPS: Int
+    var indicatorStyle: IndicatorStyle
 
     static private let outputKey = "gift.outputDirectory"
     static private let autoStartKey = "gift.autoStartAfterSelection"
     static private let fpsKey = "gift.defaultFPS"
+    static private let indicatorRedKey = "gift.indicator.red"
+    static private let indicatorGreenKey = "gift.indicator.green"
+    static private let indicatorBlueKey = "gift.indicator.blue"
+    static private let indicatorOpacityKey = "gift.indicator.opacity"
+    static private let indicatorBorderWidthKey = "gift.indicator.borderWidth"
 
     static func load() -> Settings {
         let defaults = UserDefaults.standard
@@ -31,7 +37,14 @@ struct Settings: Codable {
         let url = defaults.url(forKey: outputKey) ?? defaultDir
         let auto = defaults.object(forKey: autoStartKey) as? Bool ?? true
         let fps = defaults.object(forKey: fpsKey) as? Int ?? 30
-        return Settings(outputDirectory: url, autoStartAfterSelection: auto, defaultFPS: fps)
+        let indicatorStyle = IndicatorStyle(
+            red: defaults.cgFloat(forKey: indicatorRedKey) ?? IndicatorStyle.default.red,
+            green: defaults.cgFloat(forKey: indicatorGreenKey) ?? IndicatorStyle.default.green,
+            blue: defaults.cgFloat(forKey: indicatorBlueKey) ?? IndicatorStyle.default.blue,
+            fillOpacity: defaults.cgFloat(forKey: indicatorOpacityKey) ?? IndicatorStyle.default.fillOpacity,
+            borderWidth: defaults.cgFloat(forKey: indicatorBorderWidthKey) ?? IndicatorStyle.default.borderWidth
+        )
+        return Settings(outputDirectory: url, autoStartAfterSelection: auto, defaultFPS: fps, indicatorStyle: indicatorStyle)
     }
 
     static func save(_ settings: Settings) {
@@ -39,6 +52,38 @@ struct Settings: Codable {
         defaults.set(settings.outputDirectory, forKey: outputKey)
         defaults.set(settings.autoStartAfterSelection, forKey: autoStartKey)
         defaults.set(settings.defaultFPS, forKey: fpsKey)
+        defaults.set(Double(settings.indicatorStyle.red), forKey: indicatorRedKey)
+        defaults.set(Double(settings.indicatorStyle.green), forKey: indicatorGreenKey)
+        defaults.set(Double(settings.indicatorStyle.blue), forKey: indicatorBlueKey)
+        defaults.set(Double(settings.indicatorStyle.fillOpacity), forKey: indicatorOpacityKey)
+        defaults.set(Double(settings.indicatorStyle.borderWidth), forKey: indicatorBorderWidthKey)
+    }
+}
+
+struct IndicatorStyle: Codable, Equatable {
+    var red: CGFloat
+    var green: CGFloat
+    var blue: CGFloat
+    var fillOpacity: CGFloat
+    var borderWidth: CGFloat
+
+    static let `default` = IndicatorStyle(red: 0.0, green: 0.48, blue: 1.0, fillOpacity: 0.08, borderWidth: 2)
+
+    init(red: CGFloat, green: CGFloat, blue: CGFloat, fillOpacity: CGFloat, borderWidth: CGFloat) {
+        self.red = red.clamped(to: 0...1)
+        self.green = green.clamped(to: 0...1)
+        self.blue = blue.clamped(to: 0...1)
+        self.fillOpacity = fillOpacity.clamped(to: 0...0.4)
+        self.borderWidth = borderWidth.clamped(to: 1...8)
+    }
+
+    init(color: NSColor, fillOpacity: CGFloat, borderWidth: CGFloat) {
+        let color = color.usingColorSpace(.sRGB) ?? NSColor(calibratedRed: 0, green: 0.48, blue: 1, alpha: 1)
+        self.init(red: color.redComponent, green: color.greenComponent, blue: color.blueComponent, fillOpacity: fillOpacity, borderWidth: borderWidth)
+    }
+
+    var color: NSColor {
+        NSColor(srgbRed: red, green: green, blue: blue, alpha: 1)
     }
 }
 
@@ -121,6 +166,15 @@ final class GiftApp: NSObject, NSApplicationDelegate {
     }
 
     @objc private func startRecording() {
+        guard recorder.hasSelection else {
+            notify(text: "Select an area to start recording.")
+            presentSelection(startAfterSelection: true)
+            return
+        }
+        beginRecording()
+    }
+
+    private func beginRecording() {
         guard recorder.state == .idle else {
             appLog.info("start requested while already recording; ignoring")
             return
@@ -148,6 +202,7 @@ final class GiftApp: NSObject, NSApplicationDelegate {
                     self?.notify(text: "Saved GIF to \(url.lastPathComponent)")
                     NSPasteboard.general.clearContents()
                     NSPasteboard.general.setString(url.path, forType: .string)
+                    NSWorkspace.shared.open(url)
                 case .failure(let error):
                     if (error as? Recorder.RecorderError) != .canceled {
                         self?.notify(text: "Error: \(error.localizedDescription)")
@@ -174,6 +229,10 @@ final class GiftApp: NSObject, NSApplicationDelegate {
     }
 
     @objc private func selectArea() {
+        presentSelection(startAfterSelection: settings.autoStartAfterSelection)
+    }
+
+    private func presentSelection(startAfterSelection: Bool) {
         appLog.info("presenting selection overlay")
         SelectionOverlay.present { [weak self] result in
             guard let result else { return }
@@ -186,8 +245,8 @@ final class GiftApp: NSObject, NSApplicationDelegate {
                 self.notify(text: "Error: \(error.localizedDescription)")
                 return
             }
-            if self.settings.autoStartAfterSelection {
-                self.startRecording()
+            if startAfterSelection {
+                self.beginRecording()
             }
         }
     }
@@ -259,6 +318,7 @@ final class GiftApp: NSObject, NSApplicationDelegate {
     private func applySettings() {
         recorder.outputDirectory = settings.outputDirectory
         recorder.fps = settings.defaultFPS
+        indicatorWindow.style = settings.indicatorStyle
         fpsItems.forEach { $0.state = ($0.tag == settings.defaultFPS) ? .on : .off }
     }
 }
@@ -288,6 +348,7 @@ final class Recorder: NSObject, SCStreamOutput {
 
     private(set) var state: State = .idle
     var fps: Int = 15
+    var hasSelection: Bool { selection != nil }
 
     private var selection: SelectionContext?
     private let captureQueue = DispatchQueue(label: "gift.capture", qos: .userInteractive)
@@ -606,6 +667,13 @@ final class SelectionIndicatorWindow: NSWindow {
     private let indicatorView = SelectionIndicatorView()
     private var lastRect: CGRect?
 
+    var style: IndicatorStyle = .default {
+        didSet {
+            indicatorView.style = style
+            indicatorView.needsDisplay = true
+        }
+    }
+
     var windowID: CGWindowID { CGWindowID(windowNumber) }
 
     init() {
@@ -648,17 +716,20 @@ final class SelectionIndicatorWindow: NSWindow {
 
 final class SelectionIndicatorView: NSView {
     var isRecording = false
+    var style: IndicatorStyle = .default
 
     override func draw(_ dirtyRect: NSRect) {
         NSColor.clear.setFill()
         dirtyRect.fill()
 
         let path = NSBezierPath(rect: bounds.insetBy(dx: 1, dy: 1))
-        path.lineWidth = isRecording ? 3 : 2
-        let color = isRecording ? NSColor.systemRed : NSColor.systemBlue
+        path.lineWidth = style.borderWidth + (isRecording ? 1 : 0)
+        let color = style.color
         color.setStroke()
-        color.withAlphaComponent(isRecording ? 0.15 : 0.08).setFill()
-        path.fill()
+        if style.fillOpacity > 0 {
+            color.withAlphaComponent(style.fillOpacity).setFill()
+            path.fill()
+        }
         path.stroke()
     }
 }
@@ -744,6 +815,19 @@ private extension CGRect {
         let y2 = min(maxY, bounds.maxY)
         if x2 <= x1 || y2 <= y1 { return .zero }
         return CGRect(x: x1, y: y1, width: x2 - x1, height: y2 - y1)
+    }
+}
+
+private extension CGFloat {
+    func clamped(to range: ClosedRange<CGFloat>) -> CGFloat {
+        Swift.min(Swift.max(self, range.lowerBound), range.upperBound)
+    }
+}
+
+private extension UserDefaults {
+    func cgFloat(forKey key: String) -> CGFloat? {
+        guard let value = object(forKey: key) as? Double else { return nil }
+        return CGFloat(value)
     }
 }
 
