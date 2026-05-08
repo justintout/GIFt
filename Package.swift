@@ -12,13 +12,23 @@ let package = Package(
         .executable(name: "gift", targets: ["gift"])
     ],
     targets: [
+        .target(
+            name: "GiftCore",
+            path: "Sources/GiftCore"
+        ),
         .executableTarget(
             name: "gift",
-            path: "Sources",
+            dependencies: ["GiftCore"],
+            path: "Sources/gift",
             swiftSettings: [
                 // Relax Swift 6 strict concurrency for this small utility app.
                 .unsafeFlags(["-Xfrontend", "-strict-concurrency=minimal"])
             ]
+        ),
+        .testTarget(
+            name: "GiftCoreTests",
+            dependencies: ["GiftCore"],
+            path: "Tests/GiftCoreTests"
         )
     ]
 )

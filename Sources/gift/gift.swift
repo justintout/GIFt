@@ -1,15 +1,18 @@
 import AppKit
 @preconcurrency import ScreenCaptureKit
-import UniformTypeIdentifiers
-import ImageIO
-import VideoToolbox
-import AVFoundation
+import CoreMedia
+import OSLog
+import GiftCore
+
+private let appLog = Logger(subsystem: "com.justintout.gift", category: "app")
+private let captureLog = Logger(subsystem: "com.justintout.gift", category: "capture")
 
 // Selection context stored without keeping an NSScreen reference to remain Sendable.
 struct SelectionContext: @unchecked Sendable {
-    let rect: CGRect
+    let selectionRect: CGRect
+    let displayFrame: CGRect
     let displayID: CGDirectDisplayID
-    let cropRect: CGRect
+    let fallbackPointPixelScale: CGFloat
     let excludedWindowID: CGWindowID?
 }
 
@@ -53,16 +56,21 @@ final class GiftApp: NSObject, NSApplicationDelegate {
     private var settingsController: SettingsWindowController?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        appLog.info("applicationDidFinishLaunching")
         NSApp.setActivationPolicy(.accessory) // Hide dock icon, show only menu bar item
         // Prompt once on launch so the permission dialog appears before first capture.
-        if !CGPreflightScreenCaptureAccess() {
+        let preflight = CGPreflightScreenCaptureAccess()
+        appLog.info("screen capture permission preflight = \(preflight, privacy: .public)")
+        if !preflight {
             CGRequestScreenCaptureAccess()
         }
         setupMenuBar()
         applySettings()
+        appLog.info("setup complete; status item is nil? \(self.statusItem == nil, privacy: .public)")
     }
 
     static func main() {
+        appLog.info("entering main")
         let app = NSApplication.shared
         let delegate = GiftApp()
         app.delegate = delegate
@@ -109,19 +117,24 @@ final class GiftApp: NSObject, NSApplicationDelegate {
         menu.addItem(quitItem)
 
         statusItem.menu = menu
+        appLog.info("menu bar icon and menu configured")
     }
 
     @objc private func startRecording() {
-        guard recorder.state == .idle else { return }
+        guard recorder.state == .idle else {
+            appLog.info("start requested while already recording; ignoring")
+            return
+        }
         startItem.isEnabled = false
-        stopItem.isEnabled = true
-
-        EscTap.shared.enable { [weak self] in self?.cancelRecording() }
+        stopItem.isEnabled = false
 
         recorder.start { [weak self] status in
             Task { @MainActor in
+                appLog.info("recorder emitted status: \(status, privacy: .public)")
                 self?.updateStatusIcon(recording: true)
                 self?.indicatorWindow.setRecording(true)
+                self?.stopItem.isEnabled = true
+                EscTap.shared.enable { [weak self] in self?.cancelRecording() }
                 self?.notify(text: status)
             }
         } completion: { [weak self] result in
@@ -136,7 +149,9 @@ final class GiftApp: NSObject, NSApplicationDelegate {
                     NSPasteboard.general.clearContents()
                     NSPasteboard.general.setString(url.path, forType: .string)
                 case .failure(let error):
-                    self?.notify(text: "Error: \(error.localizedDescription)")
+                    if (error as? Recorder.RecorderError) != .canceled {
+                        self?.notify(text: "Error: \(error.localizedDescription)")
+                    }
                 }
             }
         }
@@ -148,7 +163,7 @@ final class GiftApp: NSObject, NSApplicationDelegate {
     }
 
     @objc func cancelRecording() {
-        guard recorder.state == .recording else { return }
+        guard recorder.state == .recording || recorder.state == .starting else { return }
         recorder.cancel()
         notify(text: "Recording canceled")
         indicatorWindow.setRecording(false)
@@ -159,11 +174,18 @@ final class GiftApp: NSObject, NSApplicationDelegate {
     }
 
     @objc private func selectArea() {
+        appLog.info("presenting selection overlay")
         SelectionOverlay.present { [weak self] result in
             guard let result else { return }
             guard let self else { return }
-            self.recorder.setSelection(rect: result.rect, on: result.screen, excludedWindowID: self.indicatorWindow.windowID)
-            self.indicatorWindow.show(rect: result.rect, recording: false)
+            appLog.info("selection returned rect \(String(describing: result.rect), privacy: .public) on display \(result.screen.displayID, privacy: .public)")
+            do {
+                let selectedRect = try self.recorder.setSelection(rect: result.rect, on: result.screen, excludedWindowID: self.indicatorWindow.windowID)
+                self.indicatorWindow.show(rect: selectedRect, recording: false)
+            } catch {
+                self.notify(text: "Error: \(error.localizedDescription)")
+                return
+            }
             if self.settings.autoStartAfterSelection {
                 self.startRecording()
             }
@@ -244,11 +266,12 @@ final class GiftApp: NSObject, NSApplicationDelegate {
 // MARK: - Recorder
 
 final class Recorder: NSObject, SCStreamOutput {
-    enum RecorderError: LocalizedError {
+    enum RecorderError: LocalizedError, Equatable {
         case noSelection
         case streamSetupFailed
         case noFrames
         case permissionDenied
+        case canceled
 
         var errorDescription: String? {
             switch self {
@@ -256,11 +279,12 @@ final class Recorder: NSObject, SCStreamOutput {
             case .streamSetupFailed: return "Unable to start screen capture."
             case .noFrames: return "No frames were captured."
             case .permissionDenied: return "Screen recording permission denied."
+            case .canceled: return "Recording canceled."
             }
         }
     }
 
-    enum State { case idle, recording }
+    enum State { case idle, starting, recording, stopping }
 
     private(set) var state: State = .idle
     var fps: Int = 15
@@ -270,24 +294,37 @@ final class Recorder: NSObject, SCStreamOutput {
     private let renderContext = CIContext(options: [.useSoftwareRenderer: false])
     private var frames: [(CGImage, CMTime)] = []
     private var stream: SCStream?
-    private var startTime: CMTime = .zero
     private var completionHandler: ((Result<URL, Error>) -> Void)?
     private var isCanceled = false
     var outputDirectory: URL = FileManager.default.urls(for: .moviesDirectory, in: .userDomainMask).first!
 
-    func setSelection(rect: CGRect, on screen: NSScreen, excludedWindowID: CGWindowID?) {
-        let crop = captureRect(rect, on: screen)
-        selection = SelectionContext(rect: rect.integral, displayID: screen.displayID, cropRect: crop, excludedWindowID: excludedWindowID)
+    @discardableResult
+    func setSelection(rect: CGRect, on screen: NSScreen, excludedWindowID: CGWindowID?) throws -> CGRect {
+        let display = DisplayGeometry(frame: screen.frame, pointPixelScale: screen.backingScaleFactor)
+        let geometry = try CaptureGeometryCalculator.geometry(for: rect, on: display)
+        selection = SelectionContext(
+            selectionRect: geometry.selectionRect,
+            displayFrame: screen.frame,
+            displayID: screen.displayID,
+            fallbackPointPixelScale: screen.backingScaleFactor,
+            excludedWindowID: excludedWindowID
+        )
+        return geometry.selectionRect
     }
 
     func start(status: @escaping @Sendable (String) -> Void, completion: @escaping @Sendable (Result<URL, Error>) -> Void) {
         guard state == .idle else { return }
         guard let selection else {
+            captureLog.error("start called with no selection")
             completion(.failure(RecorderError.noSelection));
             return
         }
+        state = .starting
         completionHandler = completion
-        frames.removeAll()
+        captureQueue.sync {
+            self.frames.removeAll()
+            self.isCanceled = false
+        }
 
         Task { @MainActor [weak self] in
             guard let self else { return }
@@ -295,38 +332,51 @@ final class Recorder: NSObject, SCStreamOutput {
                 try await self.beginCapture(selection: selection)
                 await MainActor.run { status("Recording… Press Stop when done.") }
             } catch {
-                await MainActor.run { completion(.failure(error)) }
+                await MainActor.run {
+                    self.finish(.failure(error))
+                }
             }
         }
     }
 
     func stop() {
         guard state == .recording else { return }
-        isCanceled = false
+        state = .stopping
+        let currentStream = stream
         Task { @MainActor in
-            try? await stream?.stopCapture()
-            stream = nil
-            state = .idle
             do {
-                let url = try writeGIF()
-                completionHandler?(.success(url))
+                try await currentStream?.stopCapture()
             } catch {
-                completionHandler?(.failure(error))
+                finish(.failure(error))
+                return
             }
-            completionHandler = nil
+            guard completionHandler != nil else { return }
+            let capturedFrames = captureQueue.sync {
+                let capturedFrames = self.frames
+                self.frames.removeAll()
+                self.isCanceled = false
+                return capturedFrames
+            }
+            do {
+                let url = try writeGIF(frames: capturedFrames)
+                finish(.success(url))
+            } catch {
+                finish(.failure(error))
+            }
         }
     }
 
     func cancel() {
-        guard state == .recording else { return }
-        isCanceled = true
+        guard state == .recording || state == .starting else { return }
+        state = .stopping
+        let currentStream = stream
+        captureQueue.sync {
+            self.isCanceled = true
+            self.frames.removeAll()
+        }
         Task { @MainActor in
-            try? await stream?.stopCapture()
-            stream = nil
-            state = .idle
-            frames.removeAll()
-            completionHandler?(.failure(RecorderError.noFrames))
-            completionHandler = nil
+            try? await currentStream?.stopCapture()
+            finish(.failure(RecorderError.canceled))
         }
     }
 
@@ -336,9 +386,6 @@ final class Recorder: NSObject, SCStreamOutput {
         // Ensure permission
         let accessGranted = CGPreflightScreenCaptureAccess() || CGRequestScreenCaptureAccess()
         guard accessGranted else { throw RecorderError.permissionDenied }
-        guard selection.cropRect.width > 0, selection.cropRect.height > 0 else {
-            throw RecorderError.streamSetupFailed
-        }
 
         let content = try await SCShareableContent.current
         guard let display = content.displays.first(where: { $0.displayID == selection.displayID }) else {
@@ -352,23 +399,45 @@ final class Recorder: NSObject, SCStreamOutput {
             excludedWindows = []
         }
 
-        let filter = SCContentFilter(display: display, excludingApplications: [], exceptingWindows: excludedWindows)
+        let filter = SCContentFilter(display: display, excludingWindows: excludedWindows)
+        let scale: CGFloat
+        if #available(macOS 14.0, *) {
+            let filterScale = CGFloat(filter.pointPixelScale)
+            scale = filterScale > 0 ? filterScale : selection.fallbackPointPixelScale
+        } else {
+            scale = selection.fallbackPointPixelScale
+        }
+        let geometry = try CaptureGeometryCalculator.geometry(
+            for: selection.selectionRect,
+            on: DisplayGeometry(frame: selection.displayFrame, pointPixelScale: scale)
+        )
+
         let config = SCStreamConfiguration()
         config.pixelFormat = kCVPixelFormatType_32BGRA
         config.scalesToFit = false
         config.showsCursor = true
         config.minimumFrameInterval = CMTime(value: 1, timescale: Int32(fps))
-        config.sourceRect = selection.cropRect            // capture only the chosen region
-        config.width = Int(selection.cropRect.width)
-        config.height = Int(selection.cropRect.height)
-        config.queueDepth = 8                             // buffer a few frames to reduce drops
+        config.sourceRect = geometry.sourceRect
+        config.destinationRect = CGRect(x: 0, y: 0, width: geometry.outputWidth, height: geometry.outputHeight)
+        config.width = geometry.outputWidth
+        config.height = geometry.outputHeight
+        config.queueDepth = 8
         config.colorSpaceName = CGColorSpace.sRGB as CFString
+        if #available(macOS 14.0, *) {
+            config.captureResolution = .best
+        }
 
-        stream = SCStream(filter: filter, configuration: config, delegate: self)
-        try stream?.addStreamOutput(self, type: .screen, sampleHandlerQueue: captureQueue)
+        let stream = SCStream(filter: filter, configuration: config, delegate: self)
+        try stream.addStreamOutput(self, type: .screen, sampleHandlerQueue: captureQueue)
+        captureLog.info("starting capture on display \(selection.displayID, privacy: .public) source \(String(describing: geometry.sourceRect), privacy: .public) output \(geometry.outputWidth, privacy: .public)x\(geometry.outputHeight, privacy: .public) scale \(scale, privacy: .public) fps \(self.fps, privacy: .public)")
+        try await stream.startCapture()
+        guard state == .starting else {
+            try? await stream.stopCapture()
+            throw RecorderError.canceled
+        }
+        self.stream = stream
         state = .recording
-        startTime = .zero
-        try await stream?.startCapture()
+        captureLog.info("capture started")
     }
 
     func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of type: SCStreamOutputType) {
@@ -387,7 +456,6 @@ final class Recorder: NSObject, SCStreamOutput {
         }
 
         let timestamp = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
-        if startTime == .zero { startTime = timestamp }
 
         autoreleasepool {
             let ciImage = CIImage(cvImageBuffer: pixelBuffer)
@@ -399,48 +467,19 @@ final class Recorder: NSObject, SCStreamOutput {
 
     // MARK: GIF Writing
 
-    private func writeGIF() throws -> URL {
-        guard !frames.isEmpty else { throw RecorderError.noFrames }
-        let url = outputDirectory.appendingPathComponent("gift-\(Int(Date().timeIntervalSince1970)).gif")
-
-        guard let destination = CGImageDestinationCreateWithURL(url as CFURL, UTType.gif.identifier as CFString, frames.count, nil) else {
-            throw RecorderError.streamSetupFailed
-        }
-
-        let delay = 1.0 / Double(fps)
-        let frameProps: CFDictionary = [
-            kCGImagePropertyGIFDictionary: [kCGImagePropertyGIFDelayTime: delay]
-        ] as CFDictionary
-        let gifProps: CFDictionary = [
-            kCGImagePropertyGIFDictionary: [kCGImagePropertyGIFLoopCount: 0]
-        ] as CFDictionary
-        CGImageDestinationSetProperties(destination, gifProps)
-
-        for frame in frames {
-            CGImageDestinationAddImage(destination, frame.0, frameProps)
-        }
-
-        guard CGImageDestinationFinalize(destination) else {
-            throw RecorderError.streamSetupFailed
-        }
+    private func writeGIF(frames: [(CGImage, CMTime)]) throws -> URL {
+        let gifFrames = frames.map { GIFFrame(image: $0.0, timestamp: $0.1) }
+        let url = try GIFWriter.write(frames: gifFrames, fps: fps, outputDirectory: outputDirectory)
+        captureLog.info("wrote GIF with \(frames.count, privacy: .public) frames to \(url.path, privacy: .public)")
         return url
     }
 
-    // Convert selection rect in points to pixel-based capture rect for ScreenCaptureKit
-    private func captureRect(_ rect: CGRect, on screen: NSScreen) -> CGRect {
-        // Convert from global screen coords to display-local pixels
-        let scale = screen.backingScaleFactor
-        let local = CGRect(x: rect.origin.x - screen.frame.origin.x,
-                           y: rect.origin.y - screen.frame.origin.y,
-                           width: rect.width,
-                           height: rect.height)
-        let pixelRect = CGRect(x: local.origin.x * scale,
-                               y: local.origin.y * scale,
-                               width: local.width * scale,
-                               height: local.height * scale)
-        let screenHeightPixels = screen.frame.height * scale
-        let originY = screenHeightPixels - pixelRect.origin.y - pixelRect.height
-        return CGRect(x: pixelRect.origin.x, y: originY, width: pixelRect.width, height: pixelRect.height).integral
+    private func finish(_ result: Result<URL, Error>) {
+        stream = nil
+        state = .idle
+        let completion = completionHandler
+        completionHandler = nil
+        completion?(result)
     }
 }
 
@@ -448,9 +487,12 @@ final class Recorder: NSObject, SCStreamOutput {
 extension Recorder: SCStreamDelegate {
     func stream(_ stream: SCStream, didStopWithError error: Error) {
         Task { @MainActor in
-            completionHandler?(.failure(error))
-            completionHandler = nil
-            state = .idle
+            captureLog.error("stream stopped with error: \(String(describing: error), privacy: .public)")
+            captureQueue.sync {
+                self.frames.removeAll()
+                self.isCanceled = false
+            }
+            finish(.failure(error))
         }
     }
 }

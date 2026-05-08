@@ -1,0 +1,98 @@
+import CoreGraphics
+import Foundation
+
+public struct DisplayGeometry: Equatable, Sendable {
+    public var frame: CGRect
+    public var pointPixelScale: CGFloat
+
+    public init(frame: CGRect, pointPixelScale: CGFloat) {
+        self.frame = frame.standardized
+        self.pointPixelScale = pointPixelScale
+    }
+}
+
+public struct CaptureGeometry: Equatable, Sendable {
+    public var selectionRect: CGRect
+    public var sourceRect: CGRect
+    public var outputWidth: Int
+    public var outputHeight: Int
+
+    public init(selectionRect: CGRect, sourceRect: CGRect, outputWidth: Int, outputHeight: Int) {
+        self.selectionRect = selectionRect
+        self.sourceRect = sourceRect
+        self.outputWidth = outputWidth
+        self.outputHeight = outputHeight
+    }
+}
+
+public enum CaptureGeometryError: LocalizedError, Equatable {
+    case emptySelection
+    case invalidScale
+
+    public var errorDescription: String? {
+        switch self {
+        case .emptySelection: return "Select an area within a display."
+        case .invalidScale: return "Unable to determine the display scale."
+        }
+    }
+}
+
+public enum CaptureGeometryCalculator {
+    public static func geometry(for selectionRect: CGRect, on display: DisplayGeometry) throws -> CaptureGeometry {
+        guard display.pointPixelScale > 0, display.pointPixelScale.isFinite else {
+            throw CaptureGeometryError.invalidScale
+        }
+
+        let clippedSelection = selectionRect.standardized.clamped(to: display.frame)
+        guard !clippedSelection.isEmpty else {
+            throw CaptureGeometryError.emptySelection
+        }
+
+        let localBottomLeft = CGRect(
+            x: clippedSelection.minX - display.frame.minX,
+            y: clippedSelection.minY - display.frame.minY,
+            width: clippedSelection.width,
+            height: clippedSelection.height
+        )
+        let localTopLeft = CGRect(
+            x: localBottomLeft.minX,
+            y: display.frame.height - localBottomLeft.maxY,
+            width: localBottomLeft.width,
+            height: localBottomLeft.height
+        )
+
+        let pixelRect = localTopLeft.scaled(by: display.pointPixelScale).integral
+        guard pixelRect.width > 0, pixelRect.height > 0 else {
+            throw CaptureGeometryError.emptySelection
+        }
+
+        let sourceRect = pixelRect.scaled(by: 1 / display.pointPixelScale)
+        return CaptureGeometry(
+            selectionRect: clippedSelection,
+            sourceRect: sourceRect,
+            outputWidth: Int(pixelRect.width),
+            outputHeight: Int(pixelRect.height)
+        )
+    }
+}
+
+private extension CGRect {
+    func clamped(to bounds: CGRect) -> CGRect {
+        let standardizedBounds = bounds.standardized
+        let x1 = max(minX, standardizedBounds.minX)
+        let y1 = max(minY, standardizedBounds.minY)
+        let x2 = min(maxX, standardizedBounds.maxX)
+        let y2 = min(maxY, standardizedBounds.maxY)
+        if x2 <= x1 || y2 <= y1 { return .zero }
+        return CGRect(x: x1, y: y1, width: x2 - x1, height: y2 - y1)
+    }
+
+    func scaled(by scale: CGFloat) -> CGRect {
+        CGRect(
+            x: origin.x * scale,
+            y: origin.y * scale,
+            width: size.width * scale,
+            height: size.height * scale
+        )
+    }
+}
