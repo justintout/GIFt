@@ -65,6 +65,53 @@ final class GIFWriterTests: XCTestCase {
         XCTAssertEqual(GIFWriter.frameDelay(at: 0, in: [frame], fps: 20), 0.05)
     }
 
+    func testWriterSamplesHighFrameRateInput() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("gift-tests-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let frames = (0..<30).map { index in
+            GIFFrame(
+                image: makeImage(width: 1, height: 1, red: 1, green: 0, blue: 0),
+                timestamp: CMTime(seconds: Double(index) / 30.0, preferredTimescale: 600)
+            )
+        }
+
+        let url = try GIFWriter.write(
+            frames: frames,
+            fps: 30,
+            outputDirectory: directory,
+            maximumFrameRate: 10
+        )
+
+        let source = try XCTUnwrap(CGImageSourceCreateWithURL(url as CFURL, nil))
+        XCTAssertLessThan(CGImageSourceGetCount(source), frames.count)
+        XCTAssertGreaterThanOrEqual(CGImageSourceGetCount(source), 8)
+    }
+
+    func testWriterScalesLargeFrames() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("gift-tests-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let frame = GIFFrame(
+            image: makeImage(width: 200, height: 100, red: 0, green: 1, blue: 0),
+            timestamp: CMTime(seconds: 0, preferredTimescale: 600)
+        )
+
+        let url = try GIFWriter.write(
+            frames: [frame],
+            fps: 10,
+            outputDirectory: directory,
+            maximumPixelDimension: 50
+        )
+
+        let source = try XCTUnwrap(CGImageSourceCreateWithURL(url as CFURL, nil))
+        let properties = try XCTUnwrap(CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as NSDictionary?)
+        XCTAssertEqual((properties[kCGImagePropertyPixelWidth] as? NSNumber)?.intValue, 50)
+        XCTAssertEqual((properties[kCGImagePropertyPixelHeight] as? NSNumber)?.intValue, 25)
+    }
+
     private func makeImage(width: Int, height: Int, red: CGFloat, green: CGFloat, blue: CGFloat) -> CGImage {
         let context = CGContext(
             data: nil,

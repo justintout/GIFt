@@ -143,7 +143,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         fpsRow.alignment = .centerY
         fpsRow.spacing = 8
         fpsRow.addArrangedSubview(NSTextField(labelWithString: "Default frame rate:"))
-        fpsPopup.addItems(withTitles: ["10", "15", "24", "30"])
+        fpsPopup.addItems(withTitles: Settings.allowedFrameRates.map(String.init))
         fpsPopup.autoenablesItems = false
         fpsRow.addArrangedSubview(fpsPopup)
         stack.addArrangedSubview(fpsRow)

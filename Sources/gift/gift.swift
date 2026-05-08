@@ -24,6 +24,9 @@ struct SelectionContext: @unchecked Sendable {
 }
 
 struct Settings: Codable {
+    static let allowedFrameRates = [8, 10, 12, 15]
+    static let defaultFrameRate = 12
+
     var outputDirectory: URL
     var autoStartAfterSelection: Bool
     var defaultFPS: Int
@@ -46,7 +49,8 @@ struct Settings: Codable {
         let defaultDir = FileManager.default.urls(for: .moviesDirectory, in: .userDomainMask).first!
         let url = defaults.url(forKey: outputKey) ?? defaultDir
         let auto = defaults.object(forKey: autoStartKey) as? Bool ?? true
-        let fps = defaults.object(forKey: fpsKey) as? Int ?? 30
+        let savedFPS = defaults.object(forKey: fpsKey) as? Int ?? defaultFrameRate
+        let fps = allowedFrameRates.contains(savedFPS) ? savedFPS : defaultFrameRate
         let hasCompletedInitialSetup = defaults.integer(forKey: initialSetupVersionKey) >= currentInitialSetupVersion
         let indicatorStyle = IndicatorStyle(
             red: defaults.cgFloat(forKey: indicatorRedKey) ?? IndicatorStyle.default.red,
@@ -171,8 +175,7 @@ final class GiftApp: NSObject, NSApplicationDelegate {
         menu.addItem(selectItem)
 
         let fpsMenu = NSMenu(title: "Frame Rate")
-        let choices = [10, 15, 24, 30]
-        for fps in choices {
+        for fps in Settings.allowedFrameRates {
             let item = NSMenuItem(title: "\(fps) fps", action: #selector(changeFPS(_:)), keyEquivalent: "")
             item.tag = fps
             item.state = fps == settings.defaultFPS ? .on : .off
@@ -433,7 +436,9 @@ final class Recorder: NSObject, SCStreamOutput {
     enum State { case idle, starting, recording, stopping }
 
     private(set) var state: State = .idle
-    var fps: Int = 15
+    private let maximumGIFFrameRate = 15
+    private let maximumGIFPixelDimension = 1280
+    var fps: Int = Settings.defaultFrameRate
     var hasSelection: Bool { selection != nil }
 
     private var selection: SelectionContext?
@@ -444,6 +449,7 @@ final class Recorder: NSObject, SCStreamOutput {
     private var stream: SCStream?
     private var completionHandler: ((Result<URL, Error>) -> Void)?
     private var isCanceled = false
+    private var lastStoredFrameTimestamp: CMTime?
     var outputDirectory: URL = FileManager.default.urls(for: .moviesDirectory, in: .userDomainMask).first!
 
     @discardableResult
@@ -472,6 +478,7 @@ final class Recorder: NSObject, SCStreamOutput {
         captureQueue.sync {
             self.frames.removeAll()
             self.isCanceled = false
+            self.lastStoredFrameTimestamp = nil
         }
 
         Task { @MainActor [weak self] in
@@ -505,14 +512,25 @@ final class Recorder: NSObject, SCStreamOutput {
                 let capturedFrames = self.frames
                 self.frames.removeAll()
                 self.isCanceled = false
+                self.lastStoredFrameTimestamp = nil
                 return capturedFrames
             }
             encodingQueue.async { [weak self] in
                 let result: Result<URL, Error>
                 do {
+                    let startedAt = Date()
                     let gifFrames = capturedFrames.map { GIFFrame(image: $0.0, timestamp: $0.1) }
-                    let url = try GIFWriter.write(frames: gifFrames, fps: fps, outputDirectory: outputDirectory)
-                    captureLog.info("wrote GIF with \(capturedFrames.count, privacy: .public) frames to \(url.path, privacy: .public)")
+                    let firstImage = gifFrames.first?.image
+                    captureLog.info("encoding GIF from \(capturedFrames.count, privacy: .public) frames at \(firstImage?.width ?? 0, privacy: .public)x\(firstImage?.height ?? 0, privacy: .public), fps \(fps, privacy: .public)")
+                    let url = try GIFWriter.write(
+                        frames: gifFrames,
+                        fps: fps,
+                        outputDirectory: outputDirectory,
+                        maximumFrameRate: self?.maximumGIFFrameRate ?? 15,
+                        maximumPixelDimension: self?.maximumGIFPixelDimension ?? 1280
+                    )
+                    let elapsed = Date().timeIntervalSince(startedAt)
+                    captureLog.info("wrote GIF with \(capturedFrames.count, privacy: .public) captured frames to \(url.path, privacy: .public) in \(elapsed, privacy: .public)s")
                     result = .success(url)
                 } catch {
                     result = .failure(error)
@@ -529,6 +547,7 @@ final class Recorder: NSObject, SCStreamOutput {
         captureQueue.sync {
             self.isCanceled = true
             self.frames.removeAll()
+            self.lastStoredFrameTimestamp = nil
         }
         Task { @MainActor in
             try? await currentStream?.stopCapture()
@@ -611,6 +630,7 @@ final class Recorder: NSObject, SCStreamOutput {
         }
 
         let timestamp = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
+        guard shouldStoreFrame(at: timestamp) else { return }
 
         autoreleasepool {
             let ciImage = CIImage(cvImageBuffer: pixelBuffer)
@@ -618,6 +638,20 @@ final class Recorder: NSObject, SCStreamOutput {
                 frames.append((cgImage, timestamp))
             }
         }
+    }
+
+    private func shouldStoreFrame(at timestamp: CMTime) -> Bool {
+        let targetFrameRate = min(maximumGIFFrameRate, max(fps, 1))
+        let minimumInterval = 1.0 / Double(targetFrameRate)
+        guard let lastStoredFrameTimestamp else {
+            self.lastStoredFrameTimestamp = timestamp
+            return true
+        }
+
+        let elapsed = CMTimeGetSeconds(timestamp - lastStoredFrameTimestamp)
+        guard elapsed.isFinite, elapsed >= minimumInterval else { return false }
+        self.lastStoredFrameTimestamp = timestamp
+        return true
     }
 
     private func finish(_ result: Result<URL, Error>) {
