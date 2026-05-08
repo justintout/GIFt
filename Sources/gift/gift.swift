@@ -2,10 +2,17 @@ import AppKit
 @preconcurrency import ScreenCaptureKit
 import CoreMedia
 import OSLog
+import Quartz
 import GiftCore
 
 private let appLog = Logger(subsystem: "com.justintout.gift", category: "app")
 private let captureLog = Logger(subsystem: "com.justintout.gift", category: "capture")
+
+private enum StatusIconState {
+    case idle
+    case recording
+    case processing
+}
 
 // Selection context stored without keeping an NSScreen reference to remain Sendable.
 struct SelectionContext: @unchecked Sendable {
@@ -92,6 +99,7 @@ struct IndicatorStyle: Codable, Equatable {
 @MainActor
 final class GiftApp: NSObject, NSApplicationDelegate {
     private let recorder = Recorder()
+    private let previewController = GIFPreviewController()
     private var statusItem: NSStatusItem!
     private var startItem: NSMenuItem!
     private var stopItem: NSMenuItem!
@@ -99,6 +107,7 @@ final class GiftApp: NSObject, NSApplicationDelegate {
     private let indicatorWindow = SelectionIndicatorWindow()
     private var settings = Settings.load()
     private var settingsController: SettingsWindowController?
+    private var processingIndicator: NSProgressIndicator?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         appLog.info("applicationDidFinishLaunching")
@@ -124,7 +133,7 @@ final class GiftApp: NSObject, NSApplicationDelegate {
 
     private func setupMenuBar() {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
-        updateStatusIcon(recording: false)
+        updateStatusIcon(.idle)
         let menu = NSMenu()
 
         startItem = NSMenuItem(title: "Start Recording", action: #selector(startRecording), keyEquivalent: "")
@@ -185,7 +194,7 @@ final class GiftApp: NSObject, NSApplicationDelegate {
         recorder.start { [weak self] status in
             Task { @MainActor in
                 appLog.info("recorder emitted status: \(status, privacy: .public)")
-                self?.updateStatusIcon(recording: true)
+                self?.updateStatusIcon(.recording)
                 self?.indicatorWindow.setRecording(true)
                 self?.stopItem.isEnabled = true
                 EscTap.shared.enable { [weak self] in self?.cancelRecording() }
@@ -195,14 +204,14 @@ final class GiftApp: NSObject, NSApplicationDelegate {
             Task { @MainActor in
                 self?.startItem.isEnabled = true
                 self?.stopItem.isEnabled = false
-                self?.updateStatusIcon(recording: false)
-                self?.indicatorWindow.setRecording(false)
+                self?.startItem.title = "Start Recording"
+                self?.updateStatusIcon(.idle)
                 switch result {
                 case .success(let url):
                     self?.notify(text: "Saved GIF to \(url.lastPathComponent)")
                     NSPasteboard.general.clearContents()
                     NSPasteboard.general.setString(url.path, forType: .string)
-                    NSWorkspace.shared.open(url)
+                    self?.previewController.show(url: url)
                 case .failure(let error):
                     if (error as? Recorder.RecorderError) != .canceled {
                         self?.notify(text: "Error: \(error.localizedDescription)")
@@ -213,6 +222,11 @@ final class GiftApp: NSObject, NSApplicationDelegate {
     }
 
     @objc private func stopRecording() {
+        indicatorWindow.hide()
+        startItem.title = "Processing GIF…"
+        startItem.isEnabled = false
+        stopItem.isEnabled = false
+        updateStatusIcon(.processing)
         recorder.stop()
         EscTap.shared.disable()
     }
@@ -223,8 +237,9 @@ final class GiftApp: NSObject, NSApplicationDelegate {
         notify(text: "Recording canceled")
         indicatorWindow.setRecording(false)
         startItem.isEnabled = true
+        startItem.title = "Start Recording"
         stopItem.isEnabled = false
-        updateStatusIcon(recording: false)
+        updateStatusIcon(.idle)
         EscTap.shared.disable()
     }
 
@@ -280,13 +295,26 @@ final class GiftApp: NSObject, NSApplicationDelegate {
         NSApp.terminate(nil)
     }
 
-    private func updateStatusIcon(recording: Bool) {
+    private func updateStatusIcon(_ state: StatusIconState) {
         guard let button = statusItem.button else { return }
-        button.image = makeStatusImage(recording: recording)
-        button.image?.isTemplate = false
+        switch state {
+        case .idle, .recording:
+            processingIndicator?.stopAnimation(nil)
+            processingIndicator?.removeFromSuperview()
+            processingIndicator = nil
+            button.image = makeStatusImage(state: state)
+            button.image?.isTemplate = false
+            button.toolTip = state == .recording ? "Recording" : "GIFt"
+        case .processing:
+            button.image = nil
+            button.toolTip = "Processing GIF…"
+            let indicator = processingIndicator ?? makeProcessingIndicator(in: button)
+            processingIndicator = indicator
+            indicator.startAnimation(nil)
+        }
     }
 
-    private func makeStatusImage(recording: Bool) -> NSImage {
+    private func makeStatusImage(state: StatusIconState) -> NSImage {
         let size = NSSize(width: 18, height: 18)
         let image = NSImage(size: size)
         image.lockFocus()
@@ -299,13 +327,29 @@ final class GiftApp: NSObject, NSApplicationDelegate {
         let innerSize: CGFloat = 8
         let innerRect = NSRect(x: (size.width - innerSize)/2, y: (size.height - innerSize)/2, width: innerSize, height: innerSize)
         let innerPath = NSBezierPath(ovalIn: innerRect)
-        (recording ? NSColor.systemRed : NSColor.clear).setFill()
+        (state == .recording ? NSColor.systemRed : NSColor.clear).setFill()
         innerPath.fill()
         NSColor.white.setStroke()
         innerPath.lineWidth = 1
         innerPath.stroke()
         image.unlockFocus()
         return image
+    }
+
+    private func makeProcessingIndicator(in button: NSStatusBarButton) -> NSProgressIndicator {
+        let indicator = NSProgressIndicator()
+        indicator.style = .spinning
+        indicator.controlSize = .small
+        indicator.isIndeterminate = true
+        indicator.translatesAutoresizingMaskIntoConstraints = false
+        button.addSubview(indicator)
+        NSLayoutConstraint.activate([
+            indicator.centerXAnchor.constraint(equalTo: button.centerXAnchor),
+            indicator.centerYAnchor.constraint(equalTo: button.centerYAnchor),
+            indicator.widthAnchor.constraint(equalToConstant: 16),
+            indicator.heightAnchor.constraint(equalToConstant: 16)
+        ])
+        return indicator
     }
 
     private func notify(text: String) {
@@ -555,6 +599,35 @@ extension Recorder: SCStreamDelegate {
             }
             finish(.failure(error))
         }
+    }
+}
+
+// MARK: - GIF Preview
+
+@MainActor
+final class GIFPreviewController: NSObject, @preconcurrency QLPreviewPanelDataSource, QLPreviewPanelDelegate {
+    private var previewURL: NSURL?
+
+    func show(url: URL) {
+        previewURL = url as NSURL
+        NSApp.activate(ignoringOtherApps: true)
+
+        guard let panel = QLPreviewPanel.shared() else {
+            NSWorkspace.shared.open(url)
+            return
+        }
+        panel.dataSource = self
+        panel.delegate = self
+        panel.reloadData()
+        panel.makeKeyAndOrderFront(nil)
+    }
+
+    func numberOfPreviewItems(in panel: QLPreviewPanel!) -> Int {
+        previewURL == nil ? 0 : 1
+    }
+
+    func previewPanel(_ panel: QLPreviewPanel!, previewItemAt index: Int) -> QLPreviewItem! {
+        previewURL
     }
 }
 
