@@ -107,19 +107,19 @@ final class GiftApp: NSObject, NSApplicationDelegate {
     private let indicatorWindow = SelectionIndicatorWindow()
     private var settings = Settings.load()
     private var settingsController: SettingsWindowController?
+    private var permissionController: PermissionOnboardingWindowController?
     private var processingIndicator: NSProgressIndicator?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         appLog.info("applicationDidFinishLaunching")
         NSApp.setActivationPolicy(.accessory) // Hide dock icon, show only menu bar item
-        // Prompt once on launch so the permission dialog appears before first capture.
         let preflight = CGPreflightScreenCaptureAccess()
         appLog.info("screen capture permission preflight = \(preflight, privacy: .public)")
-        if !preflight {
-            CGRequestScreenCaptureAccess()
-        }
         setupMenuBar()
         applySettings()
+        if !preflight {
+            showPermissionSetup()
+        }
         appLog.info("setup complete; status item is nil? \(self.statusItem == nil, privacy: .public)")
     }
 
@@ -164,6 +164,8 @@ final class GiftApp: NSObject, NSApplicationDelegate {
         let settingsItem = NSMenuItem(title: "Settings…", action: #selector(openSettings), keyEquivalent: ",")
         settingsItem.keyEquivalentModifierMask = [.command]
         menu.addItem(settingsItem)
+        let permissionItem = NSMenuItem(title: "Screen Recording Setup…", action: #selector(openPermissionSetup), keyEquivalent: "")
+        menu.addItem(permissionItem)
         let openItem = NSMenuItem(title: "Open Output Folder", action: #selector(openOutputFolder), keyEquivalent: "")
         menu.addItem(openItem)
         menu.addItem(.separator())
@@ -175,6 +177,7 @@ final class GiftApp: NSObject, NSApplicationDelegate {
     }
 
     @objc private func startRecording() {
+        guard ensureScreenRecordingAccess(onGranted: { [weak self] in self?.startRecording() }) else { return }
         guard recorder.hasSelection else {
             notify(text: "Select an area to start recording.")
             presentSelection(startAfterSelection: true)
@@ -184,6 +187,7 @@ final class GiftApp: NSObject, NSApplicationDelegate {
     }
 
     private func beginRecording() {
+        guard ensureScreenRecordingAccess(onGranted: { [weak self] in self?.beginRecording() }) else { return }
         guard recorder.state == .idle else {
             appLog.info("start requested while already recording; ignoring")
             return
@@ -248,6 +252,7 @@ final class GiftApp: NSObject, NSApplicationDelegate {
     }
 
     private func presentSelection(startAfterSelection: Bool) {
+        guard ensureScreenRecordingAccess(onGranted: { [weak self] in self?.presentSelection(startAfterSelection: startAfterSelection) }) else { return }
         appLog.info("presenting selection overlay")
         SelectionOverlay.present { [weak self] result in
             guard let result else { return }
@@ -291,8 +296,25 @@ final class GiftApp: NSObject, NSApplicationDelegate {
         settingsController?.window?.makeKeyAndOrderFront(nil)
     }
 
+    @objc private func openPermissionSetup() {
+        showPermissionSetup()
+    }
+
     @objc private func quit() {
         NSApp.terminate(nil)
+    }
+
+    private func ensureScreenRecordingAccess(onGranted: (() -> Void)? = nil) -> Bool {
+        guard !CGPreflightScreenCaptureAccess() else { return true }
+        showPermissionSetup(onGranted: onGranted)
+        return false
+    }
+
+    private func showPermissionSetup(onGranted: (() -> Void)? = nil) {
+        if permissionController == nil {
+            permissionController = PermissionOnboardingWindowController()
+        }
+        permissionController?.show(onPermissionGranted: onGranted)
     }
 
     private func updateStatusIcon(_ state: StatusIconState) {
