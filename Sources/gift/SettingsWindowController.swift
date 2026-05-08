@@ -1,4 +1,7 @@
 import AppKit
+import OSLog
+
+private let settingsLog = Logger(subsystem: "com.justintout.gift", category: "settings")
 
 @MainActor
 final class SettingsWindowController: NSWindowController, NSWindowDelegate {
@@ -23,6 +26,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     private let onSave: (Settings) -> Void
     private var isInitialSetup = false
     private var onPermissionGranted: (() -> Void)?
+    private var relaunchWatcher: Process?
 
     init(settings: Settings, onSave: @escaping (Settings) -> Void) {
         self.settings = settings
@@ -256,9 +260,22 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     }
 
     @objc private func requestAccess() {
-        if CGRequestScreenCaptureAccess() {
+        updateSettingsFromControls(completeInitialSetup: false)
+        onSave(settings)
+        if CGPreflightScreenCaptureAccess() {
             finishPermissionGranted()
+            return
+        }
+        let relaunchScheduled = startRelaunchWatcher()
+        if CGRequestScreenCaptureAccess() {
+            if relaunchScheduled {
+                permissionStatusLabel.stringValue = "Restarting GIFt..."
+                NSApp.terminate(nil)
+            } else {
+                finishPermissionGranted()
+            }
         } else {
+            cancelRelaunchWatcher()
             refreshPermissionControls()
         }
     }
@@ -292,6 +309,13 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     }
 
     @objc private func save() {
+        updateSettingsFromControls(completeInitialSetup: true)
+        onSave(settings)
+        onPermissionGranted = nil
+        window?.performClose(nil)
+    }
+
+    private func updateSettingsFromControls(completeInitialSetup: Bool) {
         settings.autoStartAfterSelection = (autoStartCheckbox.state == .on)
         if let title = fpsPopup.selectedItem?.title, let fps = Int(title) {
             settings.defaultFPS = fps
@@ -301,12 +325,9 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
             fillOpacity: CGFloat(opacitySlider.doubleValue),
             borderWidth: CGFloat(borderWidthSlider.doubleValue.rounded())
         )
-        if isInitialSetup {
+        if completeInitialSetup && isInitialSetup {
             settings.hasCompletedInitialSetup = true
         }
-        onSave(settings)
-        onPermissionGranted = nil
-        window?.performClose(nil)
     }
 
     @objc private func updateIndicatorLabels() {
@@ -332,5 +353,37 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
 
     func windowWillClose(_ notification: Notification) {
         onPermissionGranted = nil
+    }
+
+    private func startRelaunchWatcher() -> Bool {
+        guard relaunchWatcher == nil,
+              Bundle.main.bundleURL.pathExtension == "app" else { return false }
+
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/sh")
+        process.arguments = [
+            "-c",
+            "i=0; while [ $i -lt 300 ]; do if ! kill -0 \"$GIFT_PARENT_PID\" 2>/dev/null; then open -n \"$GIFT_BUNDLE_PATH\"; exit 0; fi; i=$((i + 1)); sleep 0.2; done"
+        ]
+        var environment = ProcessInfo.processInfo.environment
+        environment["GIFT_PARENT_PID"] = "\(ProcessInfo.processInfo.processIdentifier)"
+        environment["GIFT_BUNDLE_PATH"] = Bundle.main.bundleURL.path
+        process.environment = environment
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+
+        do {
+            try process.run()
+            relaunchWatcher = process
+            return true
+        } catch {
+            settingsLog.error("failed to start relaunch watcher: \(String(describing: error), privacy: .public)")
+            return false
+        }
+    }
+
+    private func cancelRelaunchWatcher() {
+        relaunchWatcher?.terminate()
+        relaunchWatcher = nil
     }
 }
