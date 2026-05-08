@@ -132,6 +132,14 @@ final class GiftApp: NSObject, NSApplicationDelegate {
         appLog.info("setup complete; status item is nil? \(self.statusItem == nil, privacy: .public)")
     }
 
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        if !flag {
+            let needsInitialSetup = !settings.hasCompletedInitialSetup
+            showSettings(initialSetup: needsInitialSetup)
+        }
+        return true
+    }
+
     static func main() {
         appLog.info("entering main")
         let app = NSApplication.shared

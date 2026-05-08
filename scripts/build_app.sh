@@ -8,6 +8,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 APP_NAME="GIFt"
 APP_BUNDLE="$ROOT/dist/${APP_NAME}.app"
 ZIP_PATH="$ROOT/dist/${APP_NAME}.zip"
+BUILD_VERSION="$(git -C "$ROOT" rev-parse --short HEAD 2>/dev/null || date +%Y%m%d%H%M%S)"
 
 mkdir -p "$ROOT/dist"
 
@@ -51,13 +52,14 @@ cat > "$APP_BUNDLE/Contents/Info.plist" <<'EOF'
   <key>CFBundleName</key><string>GIFt</string>
   <key>CFBundleIdentifier</key><string>com.justintout.gift</string>
   <key>CFBundleExecutable</key><string>GIFt</string>
-  <key>CFBundleVersion</key><string>1.0</string>
+  <key>CFBundleVersion</key><string>__BUILD_VERSION__</string>
   <key>CFBundleShortVersionString</key><string>1.0</string>
   <key>LSMinimumSystemVersion</key><string>13.0</string>
   <key>LSUIElement</key><true/>
 </dict>
 </plist>
 EOF
+perl -pi -e "s/__BUILD_VERSION__/$BUILD_VERSION/g" "$APP_BUNDLE/Contents/Info.plist"
 
 cp "$BIN_PATH" "$APP_BUNDLE/Contents/MacOS/GIFt"
 chmod +x "$APP_BUNDLE/Contents/MacOS/GIFt"

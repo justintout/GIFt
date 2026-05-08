@@ -53,6 +53,7 @@ done
 
 echo "==> Quitting any running $APP_NAME instance"
 pkill -x "$APP_NAME" >/dev/null 2>&1 || true
+pkill -x gift >/dev/null 2>&1 || true
 
 if [[ "$skip_build" == false ]]; then
   echo "==> Rebuilding app bundle"
