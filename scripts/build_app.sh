@@ -13,19 +13,20 @@ BUILD_VERSION="$(git -C "$ROOT" rev-parse --short HEAD 2>/dev/null || date +%Y%m
 mkdir -p "$ROOT/dist"
 
 ARCH_FLAGS=(--arch arm64 --arch x86_64)
-if [[ "${1:-}" == "--arm64-only" ]]; then
-  ARCH_FLAGS=(--arch arm64)
-fi
-
-echo "==> Building release binary (${ARCH_FLAGS[*]})"
-swift build -c release "${ARCH_FLAGS[@]}"
-
-# Locate the built binary (universal builds land in .build/apple/...).
 BIN_CANDIDATES=(
   "$ROOT/.build/apple/Products/Release/gift"
   "$ROOT/.build/arm64-apple-macosx/release/gift"
   "$ROOT/.build/x86_64-apple-macosx/release/gift"
 )
+if [[ "${1:-}" == "--arm64-only" ]]; then
+  ARCH_FLAGS=(--arch arm64)
+  BIN_CANDIDATES=(
+    "$ROOT/.build/arm64-apple-macosx/release/gift"
+  )
+fi
+
+echo "==> Building release binary (${ARCH_FLAGS[*]})"
+swift build -c release "${ARCH_FLAGS[@]}"
 
 BIN_PATH=""
 for path in "${BIN_CANDIDATES[@]}"; do
@@ -39,6 +40,7 @@ if [[ -z "$BIN_PATH" ]]; then
   echo "Failed to find built binary." >&2
   exit 1
 fi
+echo "==> Using binary: $BIN_PATH"
 
 echo "==> Staging app bundle at $APP_BUNDLE"
 rm -rf "$APP_BUNDLE"
