@@ -132,6 +132,11 @@ final class Recorder: NSObject, SCStreamOutput {
     private var selection: SelectionContext?
     private var stream: SCStream?
     private var completionHandler: ((Result<URL, Error>) -> Void)?
+    /// Identifies the recording currently in flight. Encoding runs off the main actor and can
+    /// outlive its recording — a stream error sets the recorder idle while the encode is still
+    /// running, which lets the next recording start. Results carry their session so a late one
+    /// cannot finish somebody else's recording.
+    private var session: UUID?
 
     private let captureQueue = DispatchQueue(label: "gift.capture", qos: .userInteractive)
     private let captureBuffer = CapturedFrames()
@@ -166,6 +171,8 @@ final class Recorder: NSObject, SCStreamOutput {
             fps: fps,
             maximumPixelDimension: Self.maximumPixelDimension(for: fps)
         )
+        let session = UUID()
+        self.session = session
         state = .starting
         completionHandler = completion
         captureQueue.sync { captureBuffer.begin(parameters: parameters) }
@@ -176,13 +183,13 @@ final class Recorder: NSObject, SCStreamOutput {
                 try await self.beginCapture(selection: selection, parameters: parameters)
                 status("Recording… Press Stop when done.")
             } catch {
-                self.finish(.failure(error))
+                self.finish(.failure(error), session: session)
             }
         }
     }
 
     func stop() {
-        guard state == .recording, let stream else { return }
+        guard state == .recording, let stream, let session else { return }
         state = .stopping
         let outputDirectory = self.outputDirectory
 
@@ -196,19 +203,19 @@ final class Recorder: NSObject, SCStreamOutput {
             guard let self else { return }
             let summary = self.takeCapturedFrames()
             let result = Self.encode(summary: summary, outputDirectory: outputDirectory)
-            await self.finish(result)
+            await self.finish(result, session: session)
         }
     }
 
     func cancel() {
-        guard state == .recording || state == .starting else { return }
+        guard state == .recording || state == .starting, let session else { return }
         state = .stopping
         captureQueue.sync { captureBuffer.cancel() }
         let stream = self.stream
 
         Task { [weak self] in
             try? await stream?.stopCapture()
-            self?.finish(.failure(RecorderError.canceled))
+            self?.finish(.failure(RecorderError.canceled), session: session)
         }
     }
 
@@ -338,7 +345,12 @@ final class Recorder: NSObject, SCStreamOutput {
         fps >= highFrameRateThreshold ? highFrameRateGIFPixelDimension : standardGIFPixelDimension
     }
 
-    private func finish(_ result: Result<URL, Error>) {
+    private func finish(_ result: Result<URL, Error>, session: UUID) {
+        guard session == self.session else {
+            captureLog.info("ignoring a result from a superseded recording")
+            return
+        }
+        self.session = nil
         stream = nil
         state = .idle
         let completion = completionHandler
@@ -351,9 +363,9 @@ extension Recorder: SCStreamDelegate {
     nonisolated func stream(_ stream: SCStream, didStopWithError error: Error) {
         captureLog.error("stream stopped with error: \(String(describing: error), privacy: .private)")
         Task { @MainActor [weak self] in
-            guard let self, self.state != .idle else { return }
+            guard let self, let session = self.session else { return }
             self.captureQueue.sync { self.captureBuffer.cancel() }
-            self.finish(.failure(error))
+            self.finish(.failure(error), session: session)
         }
     }
 }
