@@ -22,6 +22,12 @@ struct RecordingParameters: Sendable {
     let maximumPixelDimension: Int
 
     var frameInterval: Double { 1.0 / Double(max(fps, 1)) }
+
+    /// ScreenCaptureKit aims for `frameInterval` but routinely lands a hair under it, and measured
+    /// delivery gaps sit exactly on the interval. Requiring a full interval would drop every other
+    /// on-schedule frame, halving the output rate. Accepting frames up to twice the requested rate
+    /// leaves the jitter alone while still capping a runaway delivery.
+    var minimumSpacing: Double { frameInterval * 0.5 }
 }
 
 /// Frames captured so far, plus the counters that explain what happened to them.
@@ -64,15 +70,15 @@ final class CapturedFrames: @unchecked Sendable {
         return summary
     }
 
-    /// ScreenCaptureKit honors the frame interval on a best-effort basis, so drop early frames here
-    /// rather than storing them and re-throttling at encode time.
+    /// Drop frames only when they arrive well ahead of the target interval. This caps how much a
+    /// misbehaving capture can make us hold, without second-guessing normal delivery jitter.
     func append(_ image: CGImage, at timestamp: CMTime) {
         guard isActive, let parameters else { return }
         deliveredCount += 1
 
         if let lastStoredTimestamp {
             let elapsed = CMTimeGetSeconds(timestamp - lastStoredTimestamp)
-            guard elapsed.isFinite, elapsed >= parameters.frameInterval else { return }
+            guard elapsed.isFinite, elapsed >= parameters.minimumSpacing else { return }
         }
         lastStoredTimestamp = timestamp
         frames.append((image, timestamp))
