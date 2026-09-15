@@ -3,8 +3,12 @@ set -euo pipefail
 
 # Build and package GIFt.app (universal by default).
 #
+# Signing identity, in order of precedence: $GIFT_SIGN_IDENTITY, then the first Developer ID
+# Application identity in the keychain, then ad-hoc. Ad-hoc builds run locally but make recipients
+# approve the app by hand, and macOS invalidates their Screen Recording grant on every rebuild.
+#
 # Usage:
-#   scripts/build_app.sh [--arm64-only]
+#   scripts/build_app.sh [--arm64-only] [--notarize]
 
 usage() {
   awk '
@@ -19,6 +23,7 @@ APP_NAME="GIFt"
 APP_BUNDLE="$ROOT/dist/${APP_NAME}.app"
 ZIP_PATH="$ROOT/dist/${APP_NAME}.zip"
 BUILD_VERSION="$(git -C "$ROOT" rev-parse --short HEAD 2>/dev/null || date +%Y%m%d%H%M%S)"
+NOTARY_PROFILE="${GIFT_NOTARY_PROFILE:-gift-notary}"
 
 mkdir -p "$ROOT/dist"
 
@@ -28,6 +33,7 @@ BIN_CANDIDATES=(
   "$ROOT/.build/arm64-apple-macosx/release/gift"
   "$ROOT/.build/x86_64-apple-macosx/release/gift"
 )
+NOTARIZE=false
 
 for arg in "$@"; do
   case "$arg" in
@@ -36,6 +42,9 @@ for arg in "$@"; do
       BIN_CANDIDATES=(
         "$ROOT/.build/arm64-apple-macosx/release/gift"
       )
+      ;;
+    --notarize)
+      NOTARIZE=true
       ;;
     -h|--help)
       usage
@@ -48,6 +57,22 @@ for arg in "$@"; do
       ;;
   esac
 done
+
+# Ad-hoc signing cannot be notarized, so pick the identity before deciding what is possible.
+SIGN_IDENTITY="${GIFT_SIGN_IDENTITY:-}"
+if [[ -z "$SIGN_IDENTITY" ]]; then
+  SIGN_IDENTITY="$(security find-identity -v -p codesigning 2>/dev/null \
+    | awk -F'"' '/Developer ID Application/ { print $2; exit }')"
+fi
+if [[ -z "$SIGN_IDENTITY" ]]; then
+  SIGN_IDENTITY="-"
+fi
+
+if [[ "$NOTARIZE" == true && "$SIGN_IDENTITY" == "-" ]]; then
+  echo "--notarize needs a Developer ID Application identity." >&2
+  echo "Set GIFT_SIGN_IDENTITY, or create the certificate in Xcode > Settings > Accounts." >&2
+  exit 2
+fi
 
 echo "==> Building release binary (${ARCH_FLAGS[*]})"
 swift build -c release "${ARCH_FLAGS[@]}"
@@ -90,13 +115,48 @@ perl -pi -e "s/__BUILD_VERSION__/$BUILD_VERSION/g" "$APP_BUNDLE/Contents/Info.pl
 cp "$BIN_PATH" "$APP_BUNDLE/Contents/MacOS/GIFt"
 chmod +x "$APP_BUNDLE/Contents/MacOS/GIFt"
 
-echo "==> Ad-hoc signing"
-codesign --deep --force --sign - "$APP_BUNDLE"
+# No --deep: the bundle carries no nested code, and Apple recommends against it.
+if [[ "$SIGN_IDENTITY" == "-" ]]; then
+  echo "==> Signing ad-hoc (no Developer ID identity found)"
+  echo "    Recipients must approve this by hand, and macOS will drop the Screen Recording"
+  echo "    grant whenever the binary changes. Set GIFT_SIGN_IDENTITY to sign properly."
+  codesign --force --sign - "$APP_BUNDLE"
+else
+  echo "==> Signing with: $SIGN_IDENTITY"
+  # Hardened runtime and a secure timestamp are both required for notarization.
+  codesign --force --options runtime --timestamp --sign "$SIGN_IDENTITY" "$APP_BUNDLE"
+fi
+
+codesign --verify --strict "$APP_BUNDLE"
+
+create_zip() {
+  rm -f "$ZIP_PATH"
+  ditto -c -k --sequesterRsrc --keepParent "$APP_BUNDLE" "$ZIP_PATH"
+}
 
 echo "==> Creating zip: $ZIP_PATH"
-rm -f "$ZIP_PATH"
-ditto -c -k --sequesterRsrc --keepParent "$APP_BUNDLE" "$ZIP_PATH"
+create_zip
+
+if [[ "$NOTARIZE" == true ]]; then
+  echo "==> Submitting for notarization with profile '$NOTARY_PROFILE' (takes a few minutes)"
+  xcrun notarytool submit "$ZIP_PATH" --keychain-profile "$NOTARY_PROFILE" --wait
+
+  echo "==> Stapling the ticket to the app"
+  xcrun stapler staple "$APP_BUNDLE"
+
+  # Re-zip so the archive carries the stapled ticket and validates without a network round trip.
+  create_zip
+fi
 
 echo "Done."
 echo "Zip to share: $ZIP_PATH"
-echo "Unsigned: recipients should Control-click > Open on first launch."
+
+if [[ "$SIGN_IDENTITY" == "-" ]]; then
+  echo "Signature: ad-hoc — recipients should Control-click > Open on first launch."
+elif [[ "$NOTARIZE" == true ]]; then
+  echo "Signature: Developer ID, notarized and stapled — this opens with a plain double-click."
+  spctl --assess --type execute --verbose=2 "$APP_BUNDLE" 2>&1 || true
+else
+  echo "Signature: Developer ID, not notarized — Gatekeeper will still block recipients."
+  echo "Re-run with --notarize before sharing this build."
+fi
