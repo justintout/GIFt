@@ -1,0 +1,74 @@
+import AppKit
+import Carbon.HIToolbox
+
+/// A key combination, stored the way Carbon wants it so it can be handed to `RegisterEventHotKey`
+/// without translation.
+struct KeyboardShortcut: Codable, Equatable {
+    var keyCode: UInt32
+    var modifiers: UInt32
+
+    /// Control-Option-Command-S. Three modifiers so it cannot be hit by accident.
+    static let `default` = KeyboardShortcut(
+        keyCode: UInt32(kVK_ANSI_S),
+        modifiers: UInt32(controlKey | optionKey | cmdKey)
+    )
+
+    /// A bare key would be swallowed system-wide, so at least one modifier is required.
+    var isValid: Bool {
+        modifiers & UInt32(cmdKey | optionKey | controlKey | shiftKey) != 0
+    }
+
+    var displayString: String {
+        var parts = ""
+        if modifiers & UInt32(controlKey) != 0 { parts += "⌃" }
+        if modifiers & UInt32(optionKey) != 0 { parts += "⌥" }
+        if modifiers & UInt32(shiftKey) != 0 { parts += "⇧" }
+        if modifiers & UInt32(cmdKey) != 0 { parts += "⌘" }
+        return parts + Self.name(forKeyCode: keyCode)
+    }
+
+    /// Reads the key's name out of the current keyboard layout, so the label follows a user who is
+    /// not on a US layout.
+    static func name(forKeyCode keyCode: UInt32) -> String {
+        guard let source = TISCopyCurrentKeyboardLayoutInputSource()?.takeRetainedValue(),
+              let layoutPointer = TISGetInputSourceProperty(source, kTISPropertyUnicodeKeyLayoutData) else {
+            return "?"
+        }
+        let layoutData = unsafeBitCast(layoutPointer, to: CFData.self)
+        let layout = unsafeBitCast(CFDataGetBytePtr(layoutData), to: UnsafePointer<UCKeyboardLayout>.self)
+
+        var deadKeyState: UInt32 = 0
+        var length = 0
+        var characters = [UniChar](repeating: 0, count: 8)
+        let status = UCKeyTranslate(
+            layout,
+            UInt16(keyCode),
+            UInt16(kUCKeyActionDisplay),
+            0,
+            UInt32(LMGetKbdType()),
+            OptionBits(kUCKeyTranslateNoDeadKeysBit),
+            &deadKeyState,
+            characters.count,
+            &length,
+            &characters
+        )
+        guard status == noErr, length > 0 else { return "?" }
+        return String(utf16CodeUnits: characters, count: length).uppercased()
+    }
+
+    /// Builds a shortcut from an AppKit event, translating its modifier flags into Carbon's.
+    init(event: NSEvent) {
+        keyCode = UInt32(event.keyCode)
+        var carbon: UInt32 = 0
+        if event.modifierFlags.contains(.control) { carbon |= UInt32(controlKey) }
+        if event.modifierFlags.contains(.option) { carbon |= UInt32(optionKey) }
+        if event.modifierFlags.contains(.shift) { carbon |= UInt32(shiftKey) }
+        if event.modifierFlags.contains(.command) { carbon |= UInt32(cmdKey) }
+        modifiers = carbon
+    }
+
+    init(keyCode: UInt32, modifiers: UInt32) {
+        self.keyCode = keyCode
+        self.modifiers = modifiers
+    }
+}

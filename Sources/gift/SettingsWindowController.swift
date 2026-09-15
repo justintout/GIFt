@@ -10,6 +10,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     private let autoStartCheckbox = NSButton(checkboxWithTitle: "Start recording immediately after selecting an area or window", target: nil, action: nil)
     private let bringWindowToFrontCheckbox = NSButton(checkboxWithTitle: "Bring the selected window to the front before recording", target: nil, action: nil)
     private let fpsPopup = NSPopUpButton()
+    private let shortcutRecorder = ShortcutRecorderView()
     private let indicatorColorWell = NSColorWell()
     private let opacitySlider = NSSlider()
     private let opacityValueLabel = NSTextField(labelWithString: "")
@@ -159,6 +160,28 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         fpsRow.addArrangedSubview(fpsPopup)
         stack.addArrangedSubview(fpsRow)
 
+        let shortcutRow = NSStackView()
+        shortcutRow.orientation = .horizontal
+        shortcutRow.alignment = .centerY
+        shortcutRow.spacing = 8
+        shortcutRow.addArrangedSubview(NSTextField(labelWithString: "Stop and save:"))
+
+        shortcutRecorder.onCapture = { [weak self] shortcut in
+            self?.settings.stopShortcut = shortcut
+        }
+        shortcutRow.addArrangedSubview(shortcutRecorder)
+
+        let resetShortcutButton = NSButton(title: "Default", target: self, action: #selector(resetShortcut))
+        shortcutRow.addArrangedSubview(resetShortcutButton)
+        stack.addArrangedSubview(shortcutRow)
+
+        let shortcutNote = NSTextField(wrappingLabelWithString: "Works from any app and needs no permission. Escape still cancels a recording and discards it.")
+        shortcutNote.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+        shortcutNote.textColor = .secondaryLabelColor
+        shortcutNote.maximumNumberOfLines = 0
+        shortcutNote.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        stack.addArrangedSubview(shortcutNote)
+
         let indicatorLabel = NSTextField(labelWithString: "Selection overlay")
         indicatorLabel.font = .boldSystemFont(ofSize: NSFont.systemFontSize)
         stack.addArrangedSubview(indicatorLabel)
@@ -208,6 +231,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
             stack.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 16),
             stack.bottomAnchor.constraint(lessThanOrEqualTo: contentView.bottomAnchor, constant: -16),
             introLabel.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            shortcutNote.widthAnchor.constraint(equalTo: stack.widthAnchor),
             pathField.widthAnchor.constraint(greaterThanOrEqualToConstant: 300),
             opacitySlider.widthAnchor.constraint(greaterThanOrEqualToConstant: 240),
             borderWidthSlider.widthAnchor.constraint(greaterThanOrEqualToConstant: 240),
@@ -293,6 +317,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         if let index = fpsPopup.itemTitles.firstIndex(of: "\(settings.defaultFPS)") {
             fpsPopup.selectItem(at: index)
         }
+        shortcutRecorder.shortcut = settings.stopShortcut
         indicatorColorWell.color = settings.indicatorStyle.color
         opacitySlider.doubleValue = Double(settings.indicatorStyle.fillOpacity)
         borderWidthSlider.doubleValue = Double(settings.indicatorStyle.borderWidth)
@@ -382,6 +407,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
 
     private func updateSettingsFromControls() {
         settings.autoStartAfterSelection = (autoStartCheckbox.state == .on)
+        settings.stopShortcut = shortcutRecorder.shortcut
         settings.bringWindowToFront = (bringWindowToFrontCheckbox.state == .on)
         if let title = fpsPopup.selectedItem?.title, let fps = Int(title) {
             settings.defaultFPS = fps
@@ -394,6 +420,11 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         if isInitialSetup {
             settings.hasCompletedInitialSetup = true
         }
+    }
+
+    @objc private func resetShortcut() {
+        shortcutRecorder.shortcut = .default
+        settings.stopShortcut = .default
     }
 
     @objc private func updateIndicatorLabels() {

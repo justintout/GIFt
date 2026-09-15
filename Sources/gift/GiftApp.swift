@@ -19,6 +19,7 @@ final class GiftApp: NSObject, NSApplicationDelegate {
     private var processingIndicator: NSProgressIndicator?
     private var appearanceObservation: NSKeyValueObservation?
     private var iconState: StatusIconState = .idle
+    private var stopHotkey: GlobalHotkey?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory) // Menu bar only, no Dock icon.
@@ -403,6 +404,37 @@ final class GiftApp: NSObject, NSApplicationDelegate {
         indicatorWindow.style = settings.indicatorStyle
         fpsItems.forEach { $0.state = ($0.tag == settings.defaultFPS) ? .on : .off }
         updateMenuState()
+        registerStopHotkey()
+    }
+
+    /// Held for as long as the app runs rather than only while recording: the user chose the
+    /// combination, so reserving it is what they would expect, and pressing it when nothing is
+    /// recording simply does nothing.
+    private func registerStopHotkey() {
+        stopHotkey?.unregister()
+        stopHotkey = nil
+
+        let shortcut = settings.stopShortcut
+        guard shortcut.isValid else {
+            appLog.error("stop shortcut has no modifier; not registering it")
+            return
+        }
+
+        stopHotkey = GlobalHotkey(keyCode: shortcut.keyCode, modifiers: shortcut.modifiers) { [weak self] in
+            self?.stopFromShortcut()
+        }
+
+        if stopHotkey == nil {
+            appLog.error("could not register \(shortcut.displayString, privacy: .public); another application may already own it")
+            showMessage("\(shortcut.displayString) is taken by another app")
+        }
+    }
+
+    private func stopFromShortcut() {
+        // The shortcut stays registered whether or not a recording is in flight, so the guard is
+        // what makes it a no-op the rest of the time.
+        guard recorder.state == .recording else { return }
+        stopRecording()
     }
 }
 
