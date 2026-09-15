@@ -10,6 +10,8 @@ final class GiftApp: NSObject, NSApplicationDelegate {
     private var startItem: NSMenuItem!
     private var stopItem: NSMenuItem!
     private var selectAreaItem: NSMenuItem!
+    private var selectWindowItem: NSMenuItem!
+    private let windowMenu = NSMenu(title: "Select Window")
     private var fpsItems: [NSMenuItem] = []
     private let indicatorWindow = SelectionIndicatorWindow()
     private var settings = Settings.load()
@@ -59,6 +61,7 @@ final class GiftApp: NSObject, NSApplicationDelegate {
         // implements, silently overriding every isEnabled that updateMenuState sets. Measured: with
         // auto-validation on, Stop showed as clickable while idle and Start while recording.
         menu.autoenablesItems = false
+        menu.delegate = self
 
         startItem = NSMenuItem(title: "Start Recording", action: #selector(startRecording), keyEquivalent: "")
         stopItem = NSMenuItem(title: "Stop Recording", action: #selector(stopRecording), keyEquivalent: "")
@@ -68,6 +71,13 @@ final class GiftApp: NSObject, NSApplicationDelegate {
 
         selectAreaItem = NSMenuItem(title: "Select Area…", action: #selector(selectArea), keyEquivalent: "")
         menu.addItem(selectAreaItem)
+
+        selectWindowItem = NSMenuItem(title: "Select Window", action: nil, keyEquivalent: "")
+        windowMenu.autoenablesItems = false
+        selectWindowItem.submenu = windowMenu
+        menu.addItem(selectWindowItem)
+
+        menu.addItem(.separator())
 
         let fpsMenu = NSMenu(title: "Frame Rate")
         for fps in Settings.allowedFrameRates {
@@ -115,17 +125,21 @@ final class GiftApp: NSObject, NSApplicationDelegate {
             startItem.isEnabled = false
             stopItem.isEnabled = false
         }
-        // The frame rate is frozen for the duration of a recording, and a new selection cannot be
-        // taken while one is in flight.
-        let isIdle = recorder.state == .idle
-        fpsItems.forEach { $0.isEnabled = isIdle }
-        selectAreaItem.isEnabled = isIdle
+        // The frame rate is frozen for the duration of a recording, and a target can only be
+        // replaced while idle.
+        fpsItems.forEach { $0.isEnabled = canChangeTarget }
+        selectAreaItem.isEnabled = canChangeTarget
+        selectWindowItem.isEnabled = canChangeTarget
     }
+
+    /// The recording reads its target and frame rate when it starts, so neither may move underneath
+    /// a recording that is already running.
+    private var canChangeTarget: Bool { recorder.state == .idle }
 
     @objc private func startRecording() {
         guard ensureScreenRecordingAccess(onGranted: { [weak self] in self?.startRecording() }) else { return }
-        guard recorder.hasSelection else {
-            showMessage("Select an area to start recording.")
+        guard recorder.hasTarget else {
+            showMessage("Select an area or window to start recording.")
             presentSelection(startAfterSelection: true)
             return
         }
@@ -212,6 +226,105 @@ final class GiftApp: NSObject, NSApplicationDelegate {
                 self.beginRecording()
             }
         }
+    }
+
+    /// Mirrors the area flow: resolve the picked window, outline it, bring its app forward when the
+    /// user has asked for that, and start recording when they have asked for that too.
+    @objc private func selectWindow(_ sender: NSMenuItem) {
+        guard ensureScreenRecordingAccess(onGranted: { [weak self] in self?.selectWindow(sender) }) else { return }
+        guard let candidate = sender.representedObject as? WindowCandidate else { return }
+
+        Task { [weak self] in
+            guard let self else { return }
+            if self.settings.bringWindowToFront {
+                self.bringForward(candidate)
+            }
+            do {
+                let frame = try await self.recorder.setWindow(windowID: candidate.windowID)
+                appLog.info("window \(candidate.windowID, privacy: .public) chosen as the recording target")
+                self.indicatorWindow.show(rect: frame, recording: false)
+                if self.settings.autoStartAfterSelection {
+                    self.beginRecording()
+                }
+            } catch {
+                self.showMessage("Error: \(error.localizedDescription)")
+            }
+        }
+    }
+
+    /// Activating the owning application is as close as this app gets to raising one particular
+    /// window: the Accessibility API that would raise the window itself needs a permission GIFt
+    /// does not ask for, so every window of that app comes forward instead.
+    private func bringForward(_ candidate: WindowCandidate) {
+        guard let app = NSRunningApplication(processIdentifier: candidate.ownerProcessID) else { return }
+        if !app.activate(options: [.activateAllWindows, .activateIgnoringOtherApps]) {
+            appLog.info("could not bring \(candidate.ownerName, privacy: .private) forward; recording the window as it is")
+        }
+    }
+
+    /// Rebuilt every time the menu opens, because windows open and close constantly and the window
+    /// server's list is the only source that is never stale.
+    private func rebuildWindowMenu() {
+        windowMenu.removeAllItems()
+
+        let candidates = openWindows()
+        guard !candidates.isEmpty else {
+            let empty = NSMenuItem(title: "No Windows Available", action: nil, keyEquivalent: "")
+            empty.isEnabled = false
+            windowMenu.addItem(empty)
+            return
+        }
+
+        // Frontmost first, the order the window server reports.
+        for candidate in candidates {
+            let item = NSMenuItem(title: windowTitle(for: candidate), action: #selector(selectWindow(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = candidate
+            item.toolTip = candidate.label
+            item.isEnabled = canChangeTarget
+            windowMenu.addItem(item)
+        }
+    }
+
+    /// Read from the window server rather than ScreenCaptureKit because the menu has to be built
+    /// synchronously as it opens. The chosen window is resolved to an `SCWindow` when it is picked.
+    private func openWindows() -> [WindowCandidate] {
+        let options: CGWindowListOption = [.optionOnScreenOnly, .excludeDesktopElements]
+        guard let listed = CGWindowListCopyWindowInfo(options, kCGNullWindowID) as? [[String: Any]] else {
+            return []
+        }
+
+        let ownProcessID = ProcessInfo.processInfo.processIdentifier
+        return listed.compactMap { info in
+            // Layer 0 is the layer ordinary windows live on, which keeps the menu bar, the Dock,
+            // and other system chrome out of the list. GIFt's own windows are left out too: its
+            // settings window and indicator outline are not recording targets.
+            guard (info[kCGWindowLayer as String] as? Int) == 0,
+                  let windowID = info[kCGWindowNumber as String] as? CGWindowID,
+                  let ownerProcessID = info[kCGWindowOwnerPID as String] as? pid_t,
+                  ownerProcessID != ownProcessID,
+                  let ownerName = info[kCGWindowOwnerName as String] as? String,
+                  !ownerName.isEmpty,
+                  let bounds = info[kCGWindowBounds as String] as? NSDictionary,
+                  let frame = CGRect(dictionaryRepresentation: bounds),
+                  frame.width >= 1,
+                  frame.height >= 1
+            else { return nil }
+
+            return WindowCandidate(
+                windowID: windowID,
+                ownerProcessID: ownerProcessID,
+                ownerName: ownerName,
+                title: (info[kCGWindowName as String] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            )
+        }
+    }
+
+    /// Windows are often untitled and a long title would widen the whole menu, so the owning
+    /// application always appears and the title is clipped.
+    private func windowTitle(for candidate: WindowCandidate) -> String {
+        guard !candidate.title.isEmpty else { return candidate.ownerName }
+        return "\(candidate.title.truncated(to: 60)) (\(candidate.ownerName))"
     }
 
     @objc private func changeFPS(_ sender: NSMenuItem) {
@@ -302,11 +415,59 @@ final class GiftApp: NSObject, NSApplicationDelegate {
     }
 }
 
+extension GiftApp: NSMenuDelegate {
+    /// Refreshed as the menu opens rather than kept in a snapshot: windows appear and disappear
+    /// constantly, and the submenu is built from the list before the user can reach it.
+    func menuNeedsUpdate(_ menu: NSMenu) {
+        rebuildWindowMenu()
+    }
+}
+
+/// One window offered in the Select Window submenu, as the window server described it.
+private struct WindowCandidate {
+    let windowID: CGWindowID
+    let ownerProcessID: pid_t
+    let ownerName: String
+    let title: String
+
+    /// The untruncated label, which the menu item carries as its tooltip so a clipped title is
+    /// still readable.
+    var label: String {
+        title.isEmpty ? ownerName : "\(title) (\(ownerName))"
+    }
+}
+
+private extension String {
+    func truncated(to limit: Int) -> String {
+        count <= limit ? self : "\(prefix(limit - 1))…"
+    }
+}
+
 extension NSScreen {
     /// `kCGNullDirectDisplay` when the screen reports no display number, which makes the lookup in
     /// `Recorder.beginCapture` fail cleanly instead of capturing the wrong display.
     var displayID: CGDirectDisplayID {
         (deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.uint32Value
             ?? CGDirectDisplayID(kCGNullDirectDisplay)
+    }
+
+    /// CoreGraphics window bounds are measured from the top left of the primary display and AppKit
+    /// screen coordinates from its bottom left, so a window frame has to be flipped before it can
+    /// be placed on screen.
+    static func appKitBounds(fromWindowBounds bounds: CGRect) -> CGRect {
+        let primaryHeight = NSScreen.screens.first?.frame.maxY ?? 0
+        return CGRect(
+            x: bounds.minX,
+            y: primaryHeight - bounds.maxY,
+            width: bounds.width,
+            height: bounds.height
+        )
+    }
+
+    /// The scale of the display a window sits on, for the systems where ScreenCaptureKit does not
+    /// report the filter's own scale.
+    static func backingScaleFactor(forAppKitBounds bounds: CGRect) -> CGFloat {
+        let screen = NSScreen.screens.first { $0.frame.intersects(bounds) } ?? NSScreen.screens.first
+        return screen?.backingScaleFactor ?? 1
     }
 }

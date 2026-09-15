@@ -9,7 +9,8 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     private let requestAccessButton = NSButton(title: "Grant Access", target: nil, action: nil)
     private let systemSettingsButton = NSButton(title: "System Settings", target: nil, action: nil)
     private let pathField = NSTextField()
-    private let autoStartCheckbox = NSButton(checkboxWithTitle: "Start recording immediately after selecting an area", target: nil, action: nil)
+    private let autoStartCheckbox = NSButton(checkboxWithTitle: "Start recording immediately after selecting an area or window", target: nil, action: nil)
+    private let bringWindowToFrontCheckbox = NSButton(checkboxWithTitle: "Bring the selected window to the front before recording", target: nil, action: nil)
     private let fpsPopup = NSPopUpButton()
     private let indicatorColorWell = NSColorWell()
     private let opacitySlider = NSSlider()
@@ -27,7 +28,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     init(settings: Settings, onSave: @escaping (Settings) -> Void) {
         self.settings = settings
         self.onSave = onSave
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 560, height: 470),
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 560, height: 500),
                               styleMask: [.titled, .closable],
                               backing: .buffered,
                               defer: false)
@@ -134,6 +135,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         stack.addArrangedSubview(pathRow)
 
         stack.addArrangedSubview(autoStartCheckbox)
+        stack.addArrangedSubview(bringWindowToFrontCheckbox)
 
         let fpsRow = NSStackView()
         fpsRow.orientation = .horizontal
@@ -236,6 +238,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     private func apply(settings: Settings) {
         pathField.stringValue = settings.outputDirectory.path
         autoStartCheckbox.state = settings.autoStartAfterSelection ? .on : .off
+        bringWindowToFrontCheckbox.state = settings.bringWindowToFront ? .on : .off
         if let index = fpsPopup.itemTitles.firstIndex(of: "\(settings.defaultFPS)") {
             fpsPopup.selectItem(at: index)
         }
@@ -314,6 +317,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
 
     private func updateSettingsFromControls() {
         settings.autoStartAfterSelection = (autoStartCheckbox.state == .on)
+        settings.bringWindowToFront = (bringWindowToFrontCheckbox.state == .on)
         if let title = fpsPopup.selectedItem?.title, let fps = Int(title) {
             settings.defaultFPS = fps
         }

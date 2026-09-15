@@ -8,6 +8,7 @@ struct Settings: Codable {
 
     var outputDirectory: URL
     var autoStartAfterSelection: Bool
+    var bringWindowToFront: Bool
     var defaultFPS: Int
     var indicatorStyle: IndicatorStyle
     var initialSetupVersion: Int
@@ -21,6 +22,7 @@ struct Settings: Codable {
         outputDirectory: FileManager.default.urls(for: .moviesDirectory, in: .userDomainMask).first
             ?? FileManager.default.homeDirectoryForCurrentUser,
         autoStartAfterSelection: true,
+        bringWindowToFront: true,
         defaultFPS: defaultFrameRate,
         indicatorStyle: .default,
         initialSetupVersion: 0
@@ -29,6 +31,7 @@ struct Settings: Codable {
     enum CodingKeys: String, CodingKey {
         case outputDirectory
         case autoStartAfterSelection
+        case bringWindowToFront
         case defaultFPS
         case indicatorStyle
         case initialSetupVersion
@@ -67,7 +70,9 @@ struct Settings: Codable {
 extension Settings {
     /// Decoded a field at a time so a setting added in a later release cannot invalidate the whole
     /// blob. A synthesized `Decodable` throws on a missing key, which would reset every existing
-    /// user's settings — including the output folder — the first time a field was added.
+    /// user's settings — including the output folder — the first time a field was added. Every
+    /// field below is therefore optional here, not just newly added ones, so forgetting to make a
+    /// future field optional cannot reintroduce that.
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         let fallback = Settings.standard
@@ -79,6 +84,7 @@ extension Settings {
         self.init(
             outputDirectory: value(.outputDirectory, or: fallback.outputDirectory),
             autoStartAfterSelection: value(.autoStartAfterSelection, or: fallback.autoStartAfterSelection),
+            bringWindowToFront: value(.bringWindowToFront, or: fallback.bringWindowToFront),
             defaultFPS: value(.defaultFPS, or: fallback.defaultFPS),
             indicatorStyle: value(.indicatorStyle, or: fallback.indicatorStyle),
             initialSetupVersion: value(.initialSetupVersion, or: 0)

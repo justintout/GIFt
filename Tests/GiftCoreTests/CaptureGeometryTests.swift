@@ -103,6 +103,49 @@ final class CaptureGeometryTests: XCTestCase {
         XCTAssertEqual(geometry.outputHeight, 20)
     }
 
+    func testWholeFrameOutputSizeUsesPointPixelScale() throws {
+        let size = try CaptureGeometryCalculator.outputSize(
+            forFrame: CGRect(x: 400, y: 300, width: 800, height: 600),
+            pointPixelScale: 2
+        )
+
+        XCTAssertEqual(size.width, 1600)
+        XCTAssertEqual(size.height, 1200)
+    }
+
+    func testWholeFrameOutputSizeIsCappedLikeARegion() throws {
+        let size = try CaptureGeometryCalculator.outputSize(
+            forFrame: CGRect(x: 400, y: 300, width: 1000, height: 500),
+            pointPixelScale: 2,
+            maximumPixelDimension: 1280
+        )
+
+        XCTAssertEqual(size.width, 1280)
+        XCTAssertEqual(size.height, 640)
+    }
+
+    func testSmallWholeFrameIsNeverUpscaled() throws {
+        let size = try CaptureGeometryCalculator.outputSize(
+            forFrame: CGRect(x: 0, y: 0, width: 300, height: 200),
+            pointPixelScale: 1,
+            maximumPixelDimension: 1280
+        )
+
+        XCTAssertEqual(size.width, 300)
+        XCTAssertEqual(size.height, 200)
+    }
+
+    func testWholeFrameOutputSizeRejectsBadInput() {
+        XCTAssertThrowsError(try CaptureGeometryCalculator.outputSize(
+            forFrame: CGRect(x: 0, y: 0, width: 300, height: 200),
+            pointPixelScale: 0
+        ))
+        XCTAssertThrowsError(try CaptureGeometryCalculator.outputSize(
+            forFrame: .zero,
+            pointPixelScale: 2
+        ))
+    }
+
     func testFractionalSelectionExpandsToWholePixels() throws {
         let display = DisplayGeometry(
             frame: CGRect(x: 0, y: 0, width: 100, height: 100),

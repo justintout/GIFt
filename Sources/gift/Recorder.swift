@@ -14,6 +14,13 @@ struct SelectionContext: @unchecked Sendable {
     let excludedWindowID: CGWindowID?
 }
 
+/// A single window to record, stored by ID rather than by `SCWindow` so it stays valid after the
+/// enumeration it came from and can be re-resolved when the capture starts.
+struct WindowContext: Sendable {
+    let windowID: CGWindowID
+    let fallbackPointPixelScale: CGFloat
+}
+
 /// Everything about a recording that is fixed once it starts. The frame rate is frozen here
 /// because reading it live would let a mid-recording menu change corrupt the output's timing,
 /// its dimensions, and the throttle that decides which frames are kept.
@@ -118,19 +125,28 @@ final class Recorder: NSObject, SCStreamOutput {
         case noSelection
         case streamSetupFailed
         case permissionDenied
+        case windowUnavailable
         case canceled
 
         var errorDescription: String? {
             switch self {
-            case .noSelection: return "Select an area before recording."
+            case .noSelection: return "Select an area or window before recording."
             case .streamSetupFailed: return "Unable to start screen capture."
             case .permissionDenied: return "Screen recording permission denied."
+            case .windowUnavailable: return "That window is no longer available."
             case .canceled: return "Recording canceled."
             }
         }
     }
 
     enum State { case idle, starting, recording, stopping }
+
+    /// What a recording is taken from. Both cases are resolved to a live ScreenCaptureKit filter
+    /// when the capture starts.
+    private enum Target: Sendable {
+        case region(SelectionContext)
+        case window(WindowContext)
+    }
 
     /// Above this rate, narrower output keeps GIF encoding work and file size in check.
     private static let highFrameRateThreshold = 24
@@ -140,9 +156,9 @@ final class Recorder: NSObject, SCStreamOutput {
     private(set) var state: State = .idle
     var fps: Int = Settings.defaultFrameRate
     var outputDirectory: URL = Settings.standard.outputDirectory
-    var hasSelection: Bool { selection != nil }
+    var hasTarget: Bool { target != nil }
 
-    private var selection: SelectionContext?
+    private var target: Target?
     private var stream: SCStream?
     private var completionHandler: ((Result<URL, Error>) -> Void)?
     /// Identifies the recording currently in flight. Encoding runs off the main actor and can
@@ -159,14 +175,32 @@ final class Recorder: NSObject, SCStreamOutput {
     func setSelection(rect: CGRect, on screen: NSScreen, excludedWindowID: CGWindowID?) throws -> CGRect {
         let display = DisplayGeometry(frame: screen.frame, pointPixelScale: screen.backingScaleFactor)
         let geometry = try CaptureGeometryCalculator.geometry(for: rect, on: display)
-        selection = SelectionContext(
+        target = .region(SelectionContext(
             selectionRect: geometry.selectionRect,
             displayFrame: screen.frame,
             displayID: screen.displayID,
             fallbackPointPixelScale: screen.backingScaleFactor,
             excludedWindowID: excludedWindowID
-        )
+        ))
         return geometry.selectionRect
+    }
+
+    /// Records one whole window, wherever it sits and whatever covers it. The returned rect is
+    /// only for the indicator outline: the capture comes from the filter, not from a screen
+    /// region, so the window can be moved afterwards without changing what is recorded.
+    @discardableResult
+    func setWindow(windowID: CGWindowID) async throws -> CGRect {
+        let content = try await SCShareableContent.current
+        guard let window = content.windows.first(where: { $0.windowID == windowID }) else {
+            throw RecorderError.windowUnavailable
+        }
+
+        let frame = NSScreen.appKitBounds(fromWindowBounds: window.frame)
+        target = .window(WindowContext(
+            windowID: window.windowID,
+            fallbackPointPixelScale: NSScreen.backingScaleFactor(forAppKitBounds: frame)
+        ))
+        return frame
     }
 
     func start(status: @escaping (String) -> Void, completion: @escaping (Result<URL, Error>) -> Void) {
@@ -174,8 +208,8 @@ final class Recorder: NSObject, SCStreamOutput {
             captureLog.error("start called while \(String(describing: self.state), privacy: .public); ignoring")
             return
         }
-        guard let selection else {
-            captureLog.error("start called with no selection")
+        guard let target else {
+            captureLog.error("start called with no recording target")
             completion(.failure(RecorderError.noSelection))
             return
         }
@@ -193,7 +227,7 @@ final class Recorder: NSObject, SCStreamOutput {
         Task { [weak self] in
             guard let self else { return }
             do {
-                try await self.beginCapture(selection: selection, parameters: parameters)
+                try await self.beginCapture(target: target, parameters: parameters)
                 status("Recording… Press Stop when done.")
             } catch {
                 self.finish(.failure(error), session: session)
@@ -234,30 +268,10 @@ final class Recorder: NSObject, SCStreamOutput {
 
     // MARK: ScreenCaptureKit
 
-    private func beginCapture(selection: SelectionContext, parameters: RecordingParameters) async throws {
+    private func beginCapture(target: Target, parameters: RecordingParameters) async throws {
         guard CGPreflightScreenCaptureAccess() else { throw RecorderError.permissionDenied }
 
         let content = try await SCShareableContent.current
-        guard let display = content.displays.first(where: { $0.displayID == selection.displayID }) else {
-            throw RecorderError.streamSetupFailed
-        }
-
-        let excludedWindows = content.windows.filter { $0.windowID == selection.excludedWindowID }
-        let filter = SCContentFilter(display: display, excludingWindows: excludedWindows)
-
-        let scale: CGFloat
-        if #available(macOS 14.0, *) {
-            let filterScale = CGFloat(filter.pointPixelScale)
-            scale = filterScale > 0 ? filterScale : selection.fallbackPointPixelScale
-        } else {
-            scale = selection.fallbackPointPixelScale
-        }
-
-        let geometry = try CaptureGeometryCalculator.geometry(
-            for: selection.selectionRect,
-            on: DisplayGeometry(frame: selection.displayFrame, pointPixelScale: scale),
-            maximumPixelDimension: parameters.maximumPixelDimension
-        )
 
         let config = SCStreamConfiguration()
         config.pixelFormat = kCVPixelFormatType_32BGRA
@@ -266,18 +280,53 @@ final class Recorder: NSObject, SCStreamOutput {
         config.scalesToFit = true
         config.showsCursor = true
         config.minimumFrameInterval = CMTime(value: 1, timescale: Int32(parameters.fps))
-        config.sourceRect = geometry.sourceRect
-        config.width = geometry.outputWidth
-        config.height = geometry.outputHeight
         config.queueDepth = 8
         config.colorSpaceName = CGColorSpace.sRGB as CFString
         if #available(macOS 14.0, *) {
             config.captureResolution = .best
         }
 
+        let filter: SCContentFilter
+        switch target {
+        case .region(let selection):
+            guard let display = content.displays.first(where: { $0.displayID == selection.displayID }) else {
+                throw RecorderError.streamSetupFailed
+            }
+            let excludedWindows = content.windows.filter { $0.windowID == selection.excludedWindowID }
+            filter = SCContentFilter(display: display, excludingWindows: excludedWindows)
+
+            let scale = Self.pointPixelScale(of: filter, fallback: selection.fallbackPointPixelScale)
+            let geometry = try CaptureGeometryCalculator.geometry(
+                for: selection.selectionRect,
+                on: DisplayGeometry(frame: selection.displayFrame, pointPixelScale: scale),
+                maximumPixelDimension: parameters.maximumPixelDimension
+            )
+            config.sourceRect = geometry.sourceRect
+            config.width = geometry.outputWidth
+            config.height = geometry.outputHeight
+            captureLog.info("starting capture on display \(selection.displayID, privacy: .private) source \(String(describing: geometry.sourceRect), privacy: .private) output \(geometry.outputWidth, privacy: .public)x\(geometry.outputHeight, privacy: .public) scale \(scale, privacy: .public) fps \(parameters.fps, privacy: .public)")
+
+        case .window(let window):
+            guard let scWindow = content.windows.first(where: { $0.windowID == window.windowID }) else {
+                throw RecorderError.windowUnavailable
+            }
+            filter = SCContentFilter(desktopIndependentWindow: scWindow)
+
+            // A window filter hands over the window's whole content, so there is no source rect to
+            // set and the output size follows from the window's own frame.
+            let scale = Self.pointPixelScale(of: filter, fallback: window.fallbackPointPixelScale)
+            let size = try CaptureGeometryCalculator.outputSize(
+                forFrame: scWindow.frame,
+                pointPixelScale: scale,
+                maximumPixelDimension: parameters.maximumPixelDimension
+            )
+            config.width = size.width
+            config.height = size.height
+            captureLog.info("starting capture on window \(window.windowID, privacy: .public) source \(String(describing: scWindow.frame), privacy: .private) output \(size.width, privacy: .public)x\(size.height, privacy: .public) scale \(scale, privacy: .public) fps \(parameters.fps, privacy: .public)")
+        }
+
         let stream = SCStream(filter: filter, configuration: config, delegate: self)
         try stream.addStreamOutput(self, type: .screen, sampleHandlerQueue: captureQueue)
-        captureLog.info("starting capture on display \(selection.displayID, privacy: .private) source \(String(describing: geometry.sourceRect), privacy: .private) output \(geometry.outputWidth, privacy: .public)x\(geometry.outputHeight, privacy: .public) scale \(scale, privacy: .public) fps \(parameters.fps, privacy: .public)")
 
         try await stream.startCapture()
         guard state == .starting else {
@@ -352,6 +401,16 @@ final class Recorder: NSObject, SCStreamOutput {
             summary.deliveredCount, stored, written, dropped, summary.duration,
             dimensions, summary.parameters.fps, encodeSeconds, effectiveFPS
         )
+    }
+
+    /// ScreenCaptureKit reports a filter's own point-to-pixel scale from macOS 14 on. Before
+    /// that, the display the filter covers is the only source for it.
+    private static func pointPixelScale(of filter: SCContentFilter, fallback: CGFloat) -> CGFloat {
+        if #available(macOS 14.0, *) {
+            let filterScale = CGFloat(filter.pointPixelScale)
+            return filterScale > 0 ? filterScale : fallback
+        }
+        return fallback
     }
 
     private static func maximumPixelDimension(for fps: Int) -> Int {

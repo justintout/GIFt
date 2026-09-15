@@ -10,13 +10,13 @@ It is heavily inspired by [LICEcap](https://www.cockos.com/licecap/) but aims to
 - Easy sharing options
 - Simple and intuitive user interface
 - Lightweight and efficient performance
-- Customizable recording area
+- Record a selected screen area or a single window
 - Adjustable frame rate and quality settings
 - Support for keyboard shortcuts
 
 ## Privacy
 
-GIFt captures only the selected screen area after macOS Screen Recording permission is granted. Recordings are saved locally to the configured output folder; the app has no network dependencies and does not upload recordings or telemetry.
+GIFt captures only the area or window you select after macOS Screen Recording permission is granted. Recordings are saved locally to the configured output folder; the app has no network dependencies and does not upload recordings or telemetry.
 
 ## Development
 

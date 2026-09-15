@@ -81,6 +81,26 @@ public enum CaptureGeometryCalculator {
             outputHeight: outputSize.height
         )
     }
+
+    /// Output pixel dimensions for capturing `frame` whole, capped on its longer side the same way
+    /// a region is. A whole-window capture has no source rect to compute: ScreenCaptureKit gives
+    /// the window's full content and scales it to this size.
+    public static func outputSize(
+        forFrame frame: CGRect,
+        pointPixelScale: CGFloat,
+        maximumPixelDimension: Int? = nil
+    ) throws -> (width: Int, height: Int) {
+        guard pointPixelScale > 0, pointPixelScale.isFinite else {
+            throw CaptureGeometryError.invalidScale
+        }
+
+        let pixelRect = frame.standardized.scaled(by: pointPixelScale).integral
+        guard pixelRect.width > 0, pixelRect.height > 0 else {
+            throw CaptureGeometryError.emptySelection
+        }
+
+        return pixelRect.scaledDown(toFitWithin: maximumPixelDimension)
+    }
 }
 
 private extension CGRect {
