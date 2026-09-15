@@ -29,24 +29,36 @@ public enum GIFWritingError: LocalizedError, Equatable {
 }
 
 public enum GIFWriter {
+    /// GIF stores frame delays in hundredths of a second, so any delay is rounded to this unit.
+    private static let delayQuantum = 0.01
+    /// Viewers substitute 0.1s for shorter delays, so never emit one.
+    private static let minimumDelay = 0.02
+
     public static func write(
         frames: [GIFFrame],
         fps: Int,
         outputDirectory: URL,
         now: Date = Date(),
-        fileManager: FileManager = .default,
-        maximumFrameRate: Int = 15,
-        maximumPixelDimension: Int = 1280
+        fileManager: FileManager = .default
     ) throws -> URL {
         guard !frames.isEmpty else { throw GIFWritingError.noFrames }
-        let frames = framesForWriting(
-            frames,
-            maximumFrameRate: maximumFrameRate,
-            maximumPixelDimension: maximumPixelDimension
-        )
         try fileManager.createDirectory(at: outputDirectory, withIntermediateDirectories: true)
         let url = nextOutputURL(outputDirectory: outputDirectory, now: now, fileManager: fileManager)
 
+        // Encode beside the destination, then move it into place, so a failed encode
+        // cannot leave a truncated GIF in the user's output folder.
+        let temporaryURL = outputDirectory.appendingPathComponent(".gift-\(UUID().uuidString).gif")
+        do {
+            try encode(frames: frames, fps: fps, to: temporaryURL)
+            try fileManager.moveItem(at: temporaryURL, to: url)
+        } catch {
+            try? fileManager.removeItem(at: temporaryURL)
+            throw error
+        }
+        return url
+    }
+
+    private static func encode(frames: [GIFFrame], fps: Int, to url: URL) throws {
         guard let destination = CGImageDestinationCreateWithURL(url as CFURL, UTType.gif.identifier as CFString, frames.count, nil) else {
             throw GIFWritingError.destinationCreationFailed
         }
@@ -56,8 +68,9 @@ public enum GIFWriter {
         ] as CFDictionary
         CGImageDestinationSetProperties(destination, gifProps)
 
+        let delays = frameDelays(for: frames, fps: fps)
         for index in frames.indices {
-            let delay = frameDelay(at: index, in: frames, fps: fps)
+            let delay = delays[index]
             let frameProps: CFDictionary = [
                 kCGImagePropertyGIFDictionary: [
                     kCGImagePropertyGIFDelayTime: delay,
@@ -70,60 +83,46 @@ public enum GIFWriter {
         guard CGImageDestinationFinalize(destination) else {
             throw GIFWritingError.finalizeFailed
         }
-        return url
     }
 
-    static func framesForWriting(
-        _ frames: [GIFFrame],
-        maximumFrameRate: Int,
-        maximumPixelDimension: Int
-    ) -> [GIFFrame] {
-        sampledFrames(frames, maximumFrameRate: maximumFrameRate).map { frame in
-            GIFFrame(
-                image: image(frame.image, scaledToMaximumPixelDimension: maximumPixelDimension),
-                timestamp: frame.timestamp
-            )
-        }
-    }
-
-    static func sampledFrames(_ frames: [GIFFrame], maximumFrameRate: Int) -> [GIFFrame] {
-        guard frames.count > 2, maximumFrameRate > 0 else { return frames }
-
-        let minimumInterval = 1.0 / Double(maximumFrameRate)
-        var sampled = [frames[0]]
-        var lastIncludedTimestamp = frames[0].timestamp
-
-        for frame in frames.dropFirst() {
-            let elapsed = CMTimeGetSeconds(frame.timestamp - lastIncludedTimestamp)
-            guard elapsed.isFinite else { continue }
-            if elapsed >= minimumInterval {
-                sampled.append(frame)
-                lastIncludedTimestamp = frame.timestamp
-            }
-        }
-
-        if let last = frames.last,
-           let sampledLast = sampled.last,
-           CMTimeCompare(sampledLast.timestamp, last.timestamp) != 0 {
-            sampled.append(last)
-        }
-
-        return sampled
-    }
-
-    static func frameDelay(at index: Int, in frames: [GIFFrame], fps: Int) -> Double {
+    /// Per-frame delays in seconds, each rounded to the hundredth of a second the GIF format
+    /// can represent. The rounding error is carried into the next frame so the total duration
+    /// matches the requested rate instead of drifting short.
+    static func frameDelays(for frames: [GIFFrame], fps: Int) -> [Double] {
         let fallbackDelay = 1.0 / Double(max(fps, 1))
-        let delay: Double
-        if frames.indices.contains(index + 1) {
-            delay = CMTimeGetSeconds(frames[index + 1].timestamp - frames[index].timestamp)
-        } else if index > frames.startIndex {
-            delay = CMTimeGetSeconds(frames[index].timestamp - frames[index - 1].timestamp)
-        } else {
-            delay = fallbackDelay
+        var delays: [Double] = []
+        delays.reserveCapacity(frames.count)
+        var carriedError = 0.0
+
+        for index in frames.indices {
+            let desired = desiredDelay(at: index, in: frames, fallback: fallbackDelay)
+            let quantized = quantizedDelay(desired + carriedError)
+            carriedError = desired + carriedError - quantized
+            delays.append(quantized)
         }
 
-        guard delay.isFinite, delay > 0 else { return fallbackDelay }
-        return max(delay, 0.02)
+        return delays
+    }
+
+    /// The wall-clock gap this frame should be shown for, taken from the recording's own
+    /// timestamps. The final frame reuses the gap before it, since it has no successor.
+    private static func desiredDelay(at index: Int, in frames: [GIFFrame], fallback: Double) -> Double {
+        let desired: Double
+        if frames.indices.contains(index + 1) {
+            desired = CMTimeGetSeconds(frames[index + 1].timestamp - frames[index].timestamp)
+        } else if index > frames.startIndex {
+            desired = CMTimeGetSeconds(frames[index].timestamp - frames[index - 1].timestamp)
+        } else {
+            return fallback
+        }
+
+        guard desired.isFinite, desired > 0 else { return fallback }
+        return desired
+    }
+
+    private static func quantizedDelay(_ seconds: Double) -> Double {
+        let hundredths = (seconds / delayQuantum).rounded()
+        return max(hundredths * delayQuantum, minimumDelay)
     }
 
     private static func nextOutputURL(outputDirectory: URL, now: Date, fileManager: FileManager) -> URL {
@@ -135,30 +134,5 @@ public enum GIFWriter {
             suffix += 1
         }
         return url
-    }
-
-    private static func image(_ image: CGImage, scaledToMaximumPixelDimension maximumPixelDimension: Int) -> CGImage {
-        guard maximumPixelDimension > 0 else { return image }
-        let currentMaximum = max(image.width, image.height)
-        guard currentMaximum > maximumPixelDimension else { return image }
-
-        let scale = CGFloat(maximumPixelDimension) / CGFloat(currentMaximum)
-        let scaledWidth = max(1, Int((CGFloat(image.width) * scale).rounded()))
-        let scaledHeight = max(1, Int((CGFloat(image.height) * scale).rounded()))
-
-        guard let context = CGContext(
-            data: nil,
-            width: scaledWidth,
-            height: scaledHeight,
-            bitsPerComponent: 8,
-            bytesPerRow: 0,
-            space: CGColorSpaceCreateDeviceRGB(),
-            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
-        ) else {
-            return image
-        }
-        context.interpolationQuality = .medium
-        context.draw(image, in: CGRect(x: 0, y: 0, width: scaledWidth, height: scaledHeight))
-        return context.makeImage() ?? image
     }
 }

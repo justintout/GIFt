@@ -69,6 +69,40 @@ final class CaptureGeometryTests: XCTestCase {
         XCTAssertEqual(geometry.outputHeight, 20)
     }
 
+    func testOutputIsScaledDownToMaximumPixelDimension() throws {
+        let display = DisplayGeometry(
+            frame: CGRect(x: 0, y: 0, width: 100, height: 100),
+            pointPixelScale: 2
+        )
+
+        let geometry = try CaptureGeometryCalculator.geometry(
+            for: CGRect(x: 0, y: 0, width: 50, height: 25),
+            on: display,
+            maximumPixelDimension: 50
+        )
+
+        XCTAssertEqual(geometry.outputWidth, 50)
+        XCTAssertEqual(geometry.outputHeight, 25)
+        // The capture region stays native; only the delivered frame shrinks.
+        XCTAssertEqual(geometry.sourceRect, CGRect(x: 0, y: 75, width: 50, height: 25))
+    }
+
+    func testSmallSelectionIsNeverUpscaled() throws {
+        let display = DisplayGeometry(
+            frame: CGRect(x: 0, y: 0, width: 100, height: 100),
+            pointPixelScale: 2
+        )
+
+        let geometry = try CaptureGeometryCalculator.geometry(
+            for: CGRect(x: 0, y: 0, width: 10, height: 10),
+            on: display,
+            maximumPixelDimension: 1280
+        )
+
+        XCTAssertEqual(geometry.outputWidth, 20)
+        XCTAssertEqual(geometry.outputHeight, 20)
+    }
+
     func testFractionalSelectionExpandsToWholePixels() throws {
         let display = DisplayGeometry(
             frame: CGRect(x: 0, y: 0, width: 100, height: 100),

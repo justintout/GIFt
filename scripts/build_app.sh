@@ -2,7 +2,17 @@
 set -euo pipefail
 
 # Build and package GIFt.app (universal by default).
-# Usage: scripts/build_app.sh [--arm64-only]
+#
+# Usage:
+#   scripts/build_app.sh [--arm64-only]
+
+usage() {
+  awk '
+    /^# Build/ { printing = 1 }
+    printing && /^#/ { sub(/^# ?/, ""); print; next }
+    printing && !/^#/ { exit }
+  ' "$0"
+}
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 APP_NAME="GIFt"
@@ -18,12 +28,26 @@ BIN_CANDIDATES=(
   "$ROOT/.build/arm64-apple-macosx/release/gift"
   "$ROOT/.build/x86_64-apple-macosx/release/gift"
 )
-if [[ "${1:-}" == "--arm64-only" ]]; then
-  ARCH_FLAGS=(--arch arm64)
-  BIN_CANDIDATES=(
-    "$ROOT/.build/arm64-apple-macosx/release/gift"
-  )
-fi
+
+for arg in "$@"; do
+  case "$arg" in
+    --arm64-only)
+      ARCH_FLAGS=(--arch arm64)
+      BIN_CANDIDATES=(
+        "$ROOT/.build/arm64-apple-macosx/release/gift"
+      )
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      echo "Unknown argument: $arg" >&2
+      usage >&2
+      exit 2
+      ;;
+  esac
+done
 
 echo "==> Building release binary (${ARCH_FLAGS[*]})"
 swift build -c release "${ARCH_FLAGS[@]}"

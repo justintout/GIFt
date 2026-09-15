@@ -21,8 +21,9 @@ let package = Package(
             dependencies: ["GiftCore"],
             path: "Sources/gift",
             swiftSettings: [
-                // Relax Swift 6 strict concurrency for this small utility app.
-                .unsafeFlags(["-Xfrontend", "-strict-concurrency=minimal"])
+                // The AppKit surface this app drives (CGEvent taps, ScreenCaptureKit delegates,
+                // NSWindow subclasses) is not annotated for strict concurrency.
+                .swiftLanguageMode(.v5)
             ]
         ),
         .testTarget(

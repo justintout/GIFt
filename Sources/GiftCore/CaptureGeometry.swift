@@ -38,7 +38,14 @@ public enum CaptureGeometryError: LocalizedError, Equatable {
 }
 
 public enum CaptureGeometryCalculator {
-    public static func geometry(for selectionRect: CGRect, on display: DisplayGeometry) throws -> CaptureGeometry {
+    /// - Parameter maximumPixelDimension: Cap on the longer side of the captured output, so the
+    ///   capture delivers GIF-sized frames instead of full-resolution ones. Pass `nil` to keep the
+    ///   selection's native resolution. Only ever scales down; a small selection keeps its size.
+    public static func geometry(
+        for selectionRect: CGRect,
+        on display: DisplayGeometry,
+        maximumPixelDimension: Int? = nil
+    ) throws -> CaptureGeometry {
         guard display.pointPixelScale > 0, display.pointPixelScale.isFinite else {
             throw CaptureGeometryError.invalidScale
         }
@@ -66,12 +73,12 @@ public enum CaptureGeometryCalculator {
             throw CaptureGeometryError.emptySelection
         }
 
-        let sourceRect = pixelRect.scaled(by: 1 / display.pointPixelScale)
+        let outputSize = pixelRect.scaledDown(toFitWithin: maximumPixelDimension)
         return CaptureGeometry(
             selectionRect: clippedSelection,
-            sourceRect: sourceRect,
-            outputWidth: Int(pixelRect.width),
-            outputHeight: Int(pixelRect.height)
+            sourceRect: pixelRect.scaled(by: 1 / display.pointPixelScale),
+            outputWidth: outputSize.width,
+            outputHeight: outputSize.height
         )
     }
 }
@@ -93,6 +100,23 @@ private extension CGRect {
             y: origin.y * scale,
             width: size.width * scale,
             height: size.height * scale
+        )
+    }
+
+    /// Returns this rect's dimensions in whole pixels, reduced by a single shared factor so the
+    /// longer side is at most `limit`. Never enlarges.
+    func scaledDown(toFitWithin limit: Int?) -> (width: Int, height: Int) {
+        let width = Int(self.width)
+        let height = Int(self.height)
+        guard let limit, limit > 0 else { return (width, height) }
+
+        let longest = max(width, height)
+        guard longest > limit else { return (width, height) }
+
+        let factor = CGFloat(limit) / CGFloat(longest)
+        return (
+            max(1, Int((CGFloat(width) * factor).rounded())),
+            max(1, Int((CGFloat(height) * factor).rounded()))
         )
     }
 }

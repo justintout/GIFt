@@ -15,7 +15,7 @@ APP_BUNDLE="$ROOT/dist/${APP_NAME}.app"
 skip_build=false
 reset_defaults=true
 launch_app=true
-build_arg=(--arm64-only)
+build_args=(--arm64-only)
 
 usage() {
   awk '
@@ -37,7 +37,7 @@ for arg in "$@"; do
       launch_app=false
       ;;
     --universal)
-      build_arg=()
+      build_args=()
       ;;
     -h|--help)
       usage
@@ -57,7 +57,9 @@ pkill -x gift >/dev/null 2>&1 || true
 
 if [[ "$skip_build" == false ]]; then
   echo "==> Rebuilding app bundle"
-  "$ROOT/scripts/build_app.sh" "${build_arg[@]}"
+  # The +"..." form expands to nothing for an empty array, which macOS's stock bash 3.2
+  # rejects under `set -u`.
+  "$ROOT/scripts/build_app.sh" ${build_args[@]+"${build_args[@]}"}
 elif [[ ! -d "$APP_BUNDLE" ]]; then
   echo "App bundle does not exist: $APP_BUNDLE" >&2
   echo "Run without --skip-build first." >&2

@@ -1,7 +1,4 @@
 import AppKit
-import OSLog
-
-private let settingsLog = Logger(subsystem: "com.justintout.gift", category: "settings")
 
 @MainActor
 final class SettingsWindowController: NSWindowController, NSWindowDelegate {
@@ -164,8 +161,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
             label: "Fill opacity:",
             slider: opacitySlider,
             valueLabel: opacityValueLabel,
-            minValue: 0,
-            maxValue: 0.4,
+            range: IndicatorStyle.fillOpacityRange,
             action: #selector(updateIndicatorLabels)
         ))
 
@@ -173,8 +169,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
             label: "Border width:",
             slider: borderWidthSlider,
             valueLabel: borderWidthValueLabel,
-            minValue: 1,
-            maxValue: 8,
+            range: IndicatorStyle.borderWidthRange,
             action: #selector(updateIndicatorLabels)
         ))
 
@@ -210,14 +205,14 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         updateMode()
     }
 
-    private func sliderRow(label: String, slider: NSSlider, valueLabel: NSTextField, minValue: Double, maxValue: Double, action: Selector) -> NSStackView {
+    private func sliderRow(label: String, slider: NSSlider, valueLabel: NSTextField, range: ClosedRange<CGFloat>, action: Selector) -> NSStackView {
         let row = NSStackView()
         row.orientation = .horizontal
         row.alignment = .centerY
         row.spacing = 8
         row.addArrangedSubview(NSTextField(labelWithString: label))
-        slider.minValue = minValue
-        slider.maxValue = maxValue
+        slider.minValue = Double(range.lowerBound)
+        slider.maxValue = Double(range.upperBound)
         slider.target = self
         slider.action = action
         slider.numberOfTickMarks = 0
@@ -266,7 +261,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     }
 
     @objc private func requestAccess() {
-        updateSettingsFromControls(completeInitialSetup: true)
+        updateSettingsFromControls()
         onSave(settings)
         if updatePermissionControls() {
             finishPermissionGranted()
@@ -311,13 +306,13 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     }
 
     @objc private func save() {
-        updateSettingsFromControls(completeInitialSetup: true)
+        updateSettingsFromControls()
         onSave(settings)
         onPermissionGranted = nil
         window?.performClose(nil)
     }
 
-    private func updateSettingsFromControls(completeInitialSetup: Bool) {
+    private func updateSettingsFromControls() {
         settings.autoStartAfterSelection = (autoStartCheckbox.state == .on)
         if let title = fpsPopup.selectedItem?.title, let fps = Int(title) {
             settings.defaultFPS = fps
@@ -327,7 +322,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
             fillOpacity: CGFloat(opacitySlider.doubleValue),
             borderWidth: CGFloat(borderWidthSlider.doubleValue.rounded())
         )
-        if completeInitialSetup && isInitialSetup {
+        if isInitialSetup {
             settings.hasCompletedInitialSetup = true
         }
     }

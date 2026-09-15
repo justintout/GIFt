@@ -33,9 +33,8 @@ final class GIFWriterTests: XCTestCase {
         XCTAssertEqual((properties[kCGImagePropertyPixelWidth] as? NSNumber)?.intValue, 3)
         XCTAssertEqual((properties[kCGImagePropertyPixelHeight] as? NSNumber)?.intValue, 2)
 
-        let gifProperties = try XCTUnwrap(properties[kCGImagePropertyGIFDictionary] as? NSDictionary)
-        let delay = try XCTUnwrap((gifProperties[kCGImagePropertyGIFUnclampedDelayTime] as? NSNumber)?.doubleValue)
-        XCTAssertEqual(delay, 0.25, accuracy: 0.001)
+        let delays = try readDelays(from: url)
+        XCTAssertEqual(delays[0], 0.25, accuracy: 0.001)
     }
 
     func testWriterAvoidsOverwritingExistingFileForSameTimestamp() throws {
@@ -56,64 +55,134 @@ final class GIFWriterTests: XCTestCase {
         XCTAssertEqual(secondURL.lastPathComponent, "gift-99000-1.gif")
     }
 
-    func testFrameDelayFallsBackForSingleFrame() {
+    func testWriterLeavesNoTemporaryFileBehind() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("gift-tests-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let frames = [
+            GIFFrame(image: makeImage(width: 2, height: 2, red: 1, green: 1, blue: 1), timestamp: CMTime(seconds: 0, preferredTimescale: 600)),
+            GIFFrame(image: makeImage(width: 2, height: 2, red: 0, green: 0, blue: 0), timestamp: CMTime(seconds: 0.1, preferredTimescale: 600))
+        ]
+        _ = try GIFWriter.write(frames: frames, fps: 10, outputDirectory: directory)
+
+        let contents = try FileManager.default.contentsOfDirectory(atPath: directory.path)
+        XCTAssertEqual(contents.filter { $0.hasSuffix(".gif") }.count, 1)
+        XCTAssertFalse(contents.contains { $0.hasPrefix(".gift-") })
+    }
+
+    func testFrameDelaysFallBackForSingleFrame() {
         let frame = GIFFrame(
             image: makeImage(width: 1, height: 1, red: 1, green: 1, blue: 1),
             timestamp: CMTime(seconds: 0, preferredTimescale: 600)
         )
 
-        XCTAssertEqual(GIFWriter.frameDelay(at: 0, in: [frame], fps: 20), 0.05)
+        XCTAssertEqual(GIFWriter.frameDelays(for: [frame], fps: 20), [0.05])
     }
 
-    func testWriterSamplesHighFrameRateInput() throws {
+    func testFrameDelaysCarryRoundingErrorSoTotalDurationMatchesRequest() {
+        for fps in [8, 10, 12, 15, 24, 30] {
+            let frameCount = fps * 2
+            let frames = (0..<frameCount).map { index in
+                GIFFrame(
+                    image: makeImage(width: 1, height: 1, red: 1, green: 0, blue: 0),
+                    timestamp: CMTime(seconds: Double(index) / Double(fps), preferredTimescale: 60000)
+                )
+            }
+
+            let total = GIFWriter.frameDelays(for: frames, fps: fps).reduce(0, +)
+            let expected = Double(frameCount) / Double(fps)
+            XCTAssertEqual(total, expected, accuracy: expected * 0.01, "\(fps) fps should not drift")
+        }
+    }
+
+    /// The end-to-end version of the test above: ImageIO applies its own rounding on the way
+    /// into the file, so read the delays back out the way a viewer would.
+    func testWrittenGIFPlaysBackAtTheRequestedRate() throws {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("gift-tests-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: directory) }
 
-        let frames = (0..<30).map { index in
+        for fps in [8, 10, 12, 15, 24, 30] {
+            let frameCount = fps * 2
+            let frames = (0..<frameCount).map { index in
+                GIFFrame(
+                    image: makeImage(width: 4, height: 4, red: 1, green: 0, blue: 0),
+                    timestamp: CMTime(seconds: Double(index) / Double(fps), preferredTimescale: 60000)
+                )
+            }
+
+            let url = try GIFWriter.write(frames: frames, fps: fps, outputDirectory: directory)
+            let delays = try readDelays(from: url)
+            XCTAssertEqual(delays.count, frameCount)
+
+            let total = delays.reduce(0, +)
+            let expected = Double(frameCount) / Double(fps)
+            XCTAssertEqual(total, expected, accuracy: expected * 0.01, "\(fps) fps GIF should last \(expected)s")
+        }
+    }
+
+    func testEncodePerformance() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("gift-tests-bench-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        // Built outside the measured block: these are the encoder's input, not the work under test.
+        let frames = (0..<120).map { index in
             GIFFrame(
-                image: makeImage(width: 1, height: 1, red: 1, green: 0, blue: 0),
-                timestamp: CMTime(seconds: Double(index) / 30.0, preferredTimescale: 600)
+                image: makeVariedImage(width: 640, height: 360, index: index),
+                timestamp: CMTime(seconds: Double(index) / 12.0, preferredTimescale: 60000)
             )
         }
 
-        let url = try GIFWriter.write(
-            frames: frames,
-            fps: 30,
-            outputDirectory: directory,
-            maximumFrameRate: 10
-        )
-
-        let source = try XCTUnwrap(CGImageSourceCreateWithURL(url as CFURL, nil))
-        XCTAssertLessThan(CGImageSourceGetCount(source), frames.count)
-        XCTAssertGreaterThanOrEqual(CGImageSourceGetCount(source), 8)
+        measure(metrics: [XCTClockMetric(), XCTMemoryMetric()]) {
+            _ = try? GIFWriter.write(frames: frames, fps: 12, outputDirectory: directory)
+        }
     }
 
-    func testWriterScalesLargeFrames() throws {
-        let directory = FileManager.default.temporaryDirectory
-            .appendingPathComponent("gift-tests-\(UUID().uuidString)")
-        defer { try? FileManager.default.removeItem(at: directory) }
-
-        let frame = GIFFrame(
-            image: makeImage(width: 200, height: 100, red: 0, green: 1, blue: 0),
-            timestamp: CMTime(seconds: 0, preferredTimescale: 600)
-        )
-
-        let url = try GIFWriter.write(
-            frames: [frame],
-            fps: 10,
-            outputDirectory: directory,
-            maximumPixelDimension: 50
-        )
-
+    private func readDelays(from url: URL) throws -> [Double] {
         let source = try XCTUnwrap(CGImageSourceCreateWithURL(url as CFURL, nil))
-        let properties = try XCTUnwrap(CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as NSDictionary?)
-        XCTAssertEqual((properties[kCGImagePropertyPixelWidth] as? NSNumber)?.intValue, 50)
-        XCTAssertEqual((properties[kCGImagePropertyPixelHeight] as? NSNumber)?.intValue, 25)
+        return try (0..<CGImageSourceGetCount(source)).map { index in
+            let properties = try XCTUnwrap(CGImageSourceCopyPropertiesAtIndex(source, index, nil) as NSDictionary?)
+            let gifProperties = try XCTUnwrap(properties[kCGImagePropertyGIFDictionary] as? NSDictionary)
+            return try XCTUnwrap((gifProperties[kCGImagePropertyGIFDelayTime] as? NSNumber)?.doubleValue)
+        }
     }
 
     private func makeImage(width: Int, height: Int, red: CGFloat, green: CGFloat, blue: CGFloat) -> CGImage {
-        let context = CGContext(
+        let context = makeContext(width: width, height: height)
+        context.setFillColor(CGColor(red: red, green: green, blue: blue, alpha: 1))
+        context.fill(CGRect(x: 0, y: 0, width: width, height: height))
+        return context.makeImage()!
+    }
+
+    /// Screen content differs every frame. Uniform frames would make the palette reduction and
+    /// LZW pass trivially cheap and report an encode time far better than reality.
+    private func makeVariedImage(width: Int, height: Int, index: Int) -> CGImage {
+        let context = makeContext(width: width, height: height)
+        let bandHeight = CGFloat(height) / 12
+        let phase = CGFloat(index) / 60
+
+        for band in 0..<12 {
+            let t = (CGFloat(band) / 12 + phase).truncatingRemainder(dividingBy: 1)
+            context.setFillColor(CGColor(red: t, green: 1 - t, blue: 0.5, alpha: 1))
+            context.fill(CGRect(x: 0, y: CGFloat(band) * bandHeight, width: CGFloat(width), height: bandHeight + 1))
+        }
+
+        let blockSize = 16
+        for x in stride(from: 0, to: width, by: blockSize) {
+            for y in stride(from: 0, to: height, by: blockSize) {
+                let v = CGFloat((x * 31 + y * 17 + index * 13) % 256) / 255
+                context.setFillColor(CGColor(red: v, green: v, blue: v, alpha: 1))
+                context.fill(CGRect(x: x, y: y, width: blockSize, height: blockSize))
+            }
+        }
+
+        return context.makeImage()!
+    }
+
+    private func makeContext(width: Int, height: Int) -> CGContext {
+        CGContext(
             data: nil,
             width: width,
             height: height,
@@ -122,8 +191,5 @@ final class GIFWriterTests: XCTestCase {
             space: CGColorSpaceCreateDeviceRGB(),
             bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
         )!
-        context.setFillColor(CGColor(red: red, green: green, blue: blue, alpha: 1))
-        context.fill(CGRect(x: 0, y: 0, width: width, height: height))
-        return context.makeImage()!
     }
 }
