@@ -18,6 +18,11 @@ It is heavily inspired by [LICEcap](https://www.cockos.com/licecap/) but aims to
 
 GIFt captures only the area or window you select after macOS Screen Recording permission is granted. Recordings are saved locally to the configured output folder; the app has no network dependencies and does not upload recordings or telemetry.
 
+Two further permissions are optional, and GIFt never prompts for either on its own. Both are listed in Settings with what they do:
+
+- **Input Monitoring** lets Escape stop a recording while another app is in front. Escape during area selection works without it.
+- **Accessibility** brings the window you chose to the front, rather than every window its application has open.
+
 ## Development
 
 Build a local app bundle:

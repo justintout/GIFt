@@ -237,7 +237,7 @@ final class GiftApp: NSObject, NSApplicationDelegate {
         Task { [weak self] in
             guard let self else { return }
             if self.settings.bringWindowToFront {
-                self.bringForward(candidate)
+                WindowForegrounding.bringToFront(candidate)
             }
             do {
                 let frame = try await self.recorder.setWindow(windowID: candidate.windowID)
@@ -249,16 +249,6 @@ final class GiftApp: NSObject, NSApplicationDelegate {
             } catch {
                 self.showMessage("Error: \(error.localizedDescription)")
             }
-        }
-    }
-
-    /// Activating the owning application is as close as this app gets to raising one particular
-    /// window: the Accessibility API that would raise the window itself needs a permission GIFt
-    /// does not ask for, so every window of that app comes forward instead.
-    private func bringForward(_ candidate: WindowCandidate) {
-        guard let app = NSRunningApplication(processIdentifier: candidate.ownerProcessID) else { return }
-        if !app.activate(options: [.activateAllWindows, .activateIgnoringOtherApps]) {
-            appLog.info("could not bring \(candidate.ownerName, privacy: .private) forward; recording the window as it is")
         }
     }
 
@@ -315,7 +305,8 @@ final class GiftApp: NSObject, NSApplicationDelegate {
                 windowID: windowID,
                 ownerProcessID: ownerProcessID,
                 ownerName: ownerName,
-                title: (info[kCGWindowName as String] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                title: (info[kCGWindowName as String] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines),
+                frame: frame
             )
         }
     }
@@ -424,11 +415,14 @@ extension GiftApp: NSMenuDelegate {
 }
 
 /// One window offered in the Select Window submenu, as the window server described it.
-private struct WindowCandidate {
+struct WindowCandidate {
     let windowID: CGWindowID
     let ownerProcessID: pid_t
     let ownerName: String
     let title: String
+    /// Screen coordinates as the window server reports them, kept so the window can be matched
+    /// against the Accessibility API's windows when bringing it to the front.
+    let frame: CGRect
 
     /// The untruncated label, which the menu item carries as its tooltip so a clipped title is
     /// still readable.

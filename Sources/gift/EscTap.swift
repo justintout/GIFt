@@ -12,7 +12,14 @@ final class EscTap {
     private var source: CFRunLoopSource?
     private var handler: (() -> Void)?
 
+    /// The tap is only installed once Input Monitoring has been granted, which the user does from
+    /// Settings. Asking unprompted would put "GIFt would like to receive keystrokes from any
+    /// application" in front of someone who only wanted to record a GIF.
     func enable(handler: @escaping () -> Void) {
+        guard Permission.inputMonitoring.isGranted else {
+            appLog.info("not arming the Escape tap; Input Monitoring is not granted")
+            return
+        }
         self.handler = handler
         if source == nil {
             source = makeSource()
@@ -62,7 +69,7 @@ final class EscTap {
         )
 
         guard let tap else {
-            appLog.error("unable to create the Escape event tap; Escape will not stop recordings (accessibilityTrusted: \(AXIsProcessTrusted(), privacy: .public))")
+            appLog.error("unable to create the Escape event tap despite Input Monitoring (listenEventAccess: \(CGPreflightListenEventAccess(), privacy: .public))")
             return nil
         }
         return CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0)

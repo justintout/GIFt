@@ -4,10 +4,8 @@ import AppKit
 final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     private let titleLabel = NSTextField(labelWithString: "")
     private let introLabel = NSTextField(wrappingLabelWithString: "")
-    private let permissionStatusLabel = NSTextField(labelWithString: "")
-    private let permissionDetailLabel = NSTextField(wrappingLabelWithString: "")
-    private let requestAccessButton = NSButton(title: "Grant Access", target: nil, action: nil)
-    private let systemSettingsButton = NSButton(title: "System Settings", target: nil, action: nil)
+    private var permissionRows: [PermissionRow] = []
+    private let stack = NSStackView()
     private let pathField = NSTextField()
     private let autoStartCheckbox = NSButton(checkboxWithTitle: "Start recording immediately after selecting an area or window", target: nil, action: nil)
     private let bringWindowToFrontCheckbox = NSButton(checkboxWithTitle: "Bring the selected window to the front before recording", target: nil, action: nil)
@@ -38,11 +36,31 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         window.delegate = self
         setupUI()
         apply(settings: settings)
-        showUnknownPermissionStatus()
+        updatePermissionRows()
     }
 
     required init?(coder: NSCoder) {
         nil
+    }
+
+    /// One row in the permissions list. The views live together so a single refresh can update all
+    /// three from one place.
+    @MainActor
+    private final class PermissionRow {
+        let permission: Permission
+        let statusLabel = NSTextField(labelWithString: "")
+        let detailLabel = NSTextField(wrappingLabelWithString: "")
+        let grantButton = NSButton(title: "Grant…", target: nil, action: nil)
+        let settingsButton = NSButton(title: "System Settings", target: nil, action: nil)
+
+        init(permission: Permission) {
+            self.permission = permission
+            detailLabel.stringValue = permission.explanation
+            detailLabel.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+            detailLabel.textColor = .secondaryLabelColor
+            detailLabel.maximumNumberOfLines = 0
+            detailLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        }
     }
 
     func show(settings: Settings, initialSetup: Bool, onPermissionGranted: (() -> Void)? = nil) {
@@ -50,7 +68,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         self.isInitialSetup = initialSetup
         self.onPermissionGranted = onPermissionGranted
         apply(settings: settings)
-        showUnknownPermissionStatus()
+        updatePermissionRows()
         updateMode()
         window?.center()
         showWindow(nil)
@@ -62,8 +80,10 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     }
 
     func refreshPermissionStatus() {
-        let hasAccess = updatePermissionControls()
-        if hasAccess, onPermissionGranted != nil {
+        updatePermissionRows()
+        // A pending recording is waiting on Screen Recording specifically; the optional two can
+        // arrive at any time without anything else changing.
+        if Permission.screenRecording.isGranted, onPermissionGranted != nil {
             finishPermissionGranted()
         }
     }
@@ -72,7 +92,6 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         guard let contentView = window?.contentView else { return }
         contentView.wantsLayer = true
 
-        let stack = NSStackView()
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = 12
@@ -86,30 +105,23 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         introLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         stack.addArrangedSubview(introLabel)
 
-        let permissionLabel = NSTextField(labelWithString: "Screen Recording")
+        let permissionLabel = NSTextField(labelWithString: "Permissions")
         permissionLabel.font = .boldSystemFont(ofSize: NSFont.systemFontSize)
         stack.addArrangedSubview(permissionLabel)
 
-        permissionDetailLabel.maximumNumberOfLines = 0
-        permissionDetailLabel.stringValue = "GIFt needs Screen Recording access before it can capture selected areas. macOS will show its permission prompt only after you choose Grant Access."
-        permissionDetailLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        stack.addArrangedSubview(permissionDetailLabel)
-
-        stack.addArrangedSubview(permissionStatusLabel)
-
-        let permissionButtonRow = NSStackView()
-        permissionButtonRow.orientation = .horizontal
-        permissionButtonRow.alignment = .centerY
-        permissionButtonRow.spacing = 8
-
-        requestAccessButton.target = self
-        requestAccessButton.action = #selector(requestAccess)
-        systemSettingsButton.target = self
-        systemSettingsButton.action = #selector(openScreenRecordingSettings)
-
-        permissionButtonRow.addArrangedSubview(requestAccessButton)
-        permissionButtonRow.addArrangedSubview(systemSettingsButton)
-        stack.addArrangedSubview(permissionButtonRow)
+        // Every permission the app can use is listed with what it buys, so nobody has to guess why
+        // GIFt wants to watch keystrokes or reach into another application's windows.
+        for (index, permission) in Permission.allCases.enumerated() {
+            let row = PermissionRow(permission: permission)
+            row.grantButton.target = self
+            row.grantButton.action = #selector(grantPermission(_:))
+            row.grantButton.tag = index
+            row.settingsButton.target = self
+            row.settingsButton.action = #selector(openPermissionSettings(_:))
+            row.settingsButton.tag = index
+            permissionRows.append(row)
+            stack.addArrangedSubview(makePermissionRow(row))
+        }
 
         let outputLabel = NSTextField(labelWithString: "Recording")
         outputLabel.font = .boldSystemFont(ofSize: NSFont.systemFontSize)
@@ -196,7 +208,6 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
             stack.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 16),
             stack.bottomAnchor.constraint(lessThanOrEqualTo: contentView.bottomAnchor, constant: -16),
             introLabel.widthAnchor.constraint(equalTo: stack.widthAnchor),
-            permissionDetailLabel.widthAnchor.constraint(equalTo: stack.widthAnchor),
             pathField.widthAnchor.constraint(greaterThanOrEqualToConstant: 300),
             opacitySlider.widthAnchor.constraint(greaterThanOrEqualToConstant: 240),
             borderWidthSlider.widthAnchor.constraint(greaterThanOrEqualToConstant: 240),
@@ -204,7 +215,47 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
             borderWidthValueLabel.widthAnchor.constraint(equalToConstant: 48)
         ])
 
+        // The explanations wrap, so each needs the full width rather than its intrinsic one.
+        NSLayoutConstraint.activate(permissionRows.map { $0.detailLabel.widthAnchor.constraint(equalTo: stack.widthAnchor) })
+
+        // Sized to the content rather than a fixed height, so adding a setting or a permission
+        // cannot silently clip the bottom of the window.
+        stack.layoutSubtreeIfNeeded()
+        window?.setContentSize(NSSize(width: 560, height: stack.fittingSize.height + 32))
+
         updateMode()
+    }
+
+    /// One permission: its name, whether it is granted, what it buys, and how to get it.
+    private func makePermissionRow(_ row: PermissionRow) -> NSStackView {
+        let container = NSStackView()
+        container.orientation = .vertical
+        container.alignment = .leading
+        container.spacing = 2
+
+        let header = NSStackView()
+        header.orientation = .horizontal
+        header.alignment = .firstBaseline
+        header.spacing = 6
+
+        let name = NSTextField(labelWithString: row.permission.title)
+        name.font = .boldSystemFont(ofSize: NSFont.smallSystemFontSize)
+        header.addArrangedSubview(name)
+
+        row.statusLabel.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+        header.addArrangedSubview(row.statusLabel)
+        container.addArrangedSubview(header)
+
+        container.addArrangedSubview(row.detailLabel)
+
+        let buttons = NSStackView()
+        buttons.orientation = .horizontal
+        buttons.spacing = 8
+        buttons.addArrangedSubview(row.grantButton)
+        buttons.addArrangedSubview(row.settingsButton)
+        container.addArrangedSubview(buttons)
+
+        return container
     }
 
     private func sliderRow(label: String, slider: NSSlider, valueLabel: NSTextField, range: ClosedRange<CGFloat>, action: Selector) -> NSStackView {
@@ -248,32 +299,42 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         updateIndicatorLabels()
     }
 
-    @discardableResult
-    private func updatePermissionControls() -> Bool {
-        let hasAccess = CGPreflightScreenCaptureAccess()
-        permissionStatusLabel.stringValue = hasAccess ? "Screen Recording access is enabled." : "Screen Recording access is not enabled yet."
-        requestAccessButton.isHidden = hasAccess
-        systemSettingsButton.isHidden = hasAccess
-        return hasAccess
+    private func updatePermissionRows() {
+        for row in permissionRows {
+            let granted = row.permission.isGranted
+            row.statusLabel.stringValue = granted ? "granted" : "not granted"
+            row.statusLabel.textColor = granted ? .systemGreen : .secondaryLabelColor
+            row.grantButton.isHidden = granted
+            row.settingsButton.isHidden = granted
+        }
     }
 
-    private func showUnknownPermissionStatus() {
-        permissionStatusLabel.stringValue = "Screen Recording access has not been checked yet."
-        requestAccessButton.isHidden = false
-        systemSettingsButton.isHidden = false
+    @objc private func grantPermission(_ sender: NSButton) {
+        let permission = permissionRows[sender.tag].permission
+        guard permission == .screenRecording else {
+            // macOS has no inline prompt for these two; requesting sends the user to System Settings.
+            permission.request()
+            updatePermissionRows()
+            return
+        }
+        requestScreenRecording()
     }
 
-    @objc private func requestAccess() {
+    /// Screen Recording is the only one macOS grants inline, and the capture stack needs the app
+    /// restarted afterwards to pick it up.
+    private func requestScreenRecording() {
         updateSettingsFromControls()
         onSave(settings)
-        if updatePermissionControls() {
+
+        if Permission.screenRecording.isGranted {
             finishPermissionGranted()
             return
         }
+
         let relaunchScheduled = startRelaunchWatcher()
-        if CGRequestScreenCaptureAccess() {
+        if Permission.screenRecording.request() {
             if relaunchScheduled {
-                permissionStatusLabel.stringValue = "Restarting GIFt..."
+                screenRecordingRow?.statusLabel.stringValue = "Restarting GIFt…"
                 NSApp.terminate(nil)
             } else {
                 finishPermissionGranted()
@@ -284,13 +345,17 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
                 settings.hasCompletedInitialSetup = false
                 onSave(settings)
             }
-            updatePermissionControls()
+            updatePermissionRows()
         }
     }
 
-    @objc private func openScreenRecordingSettings() {
-        let settingsURL = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")!
-        if !NSWorkspace.shared.open(settingsURL) {
+    private var screenRecordingRow: PermissionRow? {
+        permissionRows.first { $0.permission == .screenRecording }
+    }
+
+    @objc private func openPermissionSettings(_ sender: NSButton) {
+        let permission = permissionRows[sender.tag].permission
+        if !NSWorkspace.shared.open(permission.settingsURL) {
             NSWorkspace.shared.open(URL(fileURLWithPath: "/System/Applications/System Settings.app"))
         }
     }
@@ -343,7 +408,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     }
 
     private func finishPermissionGranted() {
-        updatePermissionControls()
+        updatePermissionRows()
         let callback = onPermissionGranted
         onPermissionGranted = nil
         if callback != nil {
