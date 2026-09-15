@@ -60,6 +60,14 @@ final class EscTap {
                 }
                 guard type == .keyDown else { return Unmanaged.passUnretained(event) }
 
+                // Only a bare Escape cancels. This tap sees the key before the system delivers a
+                // hotkey, so a modified Escape - command-Escape above all, which is the default
+                // stop-and-save - would otherwise cancel and discard the recording the user meant
+                // to keep.
+                guard event.flags.isDisjoint(with: [.maskCommand, .maskControl, .maskAlternate, .maskShift]) else {
+                    return Unmanaged.passUnretained(event)
+                }
+
                 if event.getIntegerValueField(.keyboardEventKeycode) == Int64(escapeKeyCode) {
                     tap.handler?()
                 }

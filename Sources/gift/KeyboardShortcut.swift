@@ -7,10 +7,10 @@ struct KeyboardShortcut: Codable, Equatable {
     var keyCode: UInt32
     var modifiers: UInt32
 
-    /// Control-Option-Command-S. Three modifiers so it cannot be hit by accident.
+    /// Command-Escape: the deliberate counterpart to the bare Escape that discards a recording.
     static let `default` = KeyboardShortcut(
-        keyCode: UInt32(kVK_ANSI_S),
-        modifiers: UInt32(controlKey | optionKey | cmdKey)
+        keyCode: UInt32(kVK_Escape),
+        modifiers: UInt32(cmdKey)
     )
 
     /// A bare key would be swallowed system-wide, so at least one modifier is required.
