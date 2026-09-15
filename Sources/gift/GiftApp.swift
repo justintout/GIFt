@@ -55,6 +55,10 @@ final class GiftApp: NSObject, NSApplicationDelegate {
     private func setupMenuBar() {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         let menu = NSMenu()
+        // Without this, AppKit's automatic validation re-enables any item whose action this object
+        // implements, silently overriding every isEnabled that updateMenuState sets. Measured: with
+        // auto-validation on, Stop showed as clickable while idle and Start while recording.
+        menu.autoenablesItems = false
 
         startItem = NSMenuItem(title: "Start Recording", action: #selector(startRecording), keyEquivalent: "")
         stopItem = NSMenuItem(title: "Stop Recording", action: #selector(stopRecording), keyEquivalent: "")
