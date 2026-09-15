@@ -151,7 +151,10 @@ final class Recorder: NSObject, SCStreamOutput {
     }
 
     func start(status: @escaping (String) -> Void, completion: @escaping (Result<URL, Error>) -> Void) {
-        guard state == .idle else { return }
+        guard state == .idle else {
+            captureLog.error("start called while \(String(describing: self.state), privacy: .public); ignoring")
+            return
+        }
         guard let selection else {
             captureLog.error("start called with no selection")
             completion(.failure(RecorderError.noSelection))
