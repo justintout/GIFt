@@ -43,9 +43,15 @@ final class CapturedFrames: @unchecked Sendable {
         let duration: Double
     }
 
+    /// Roughly where a long recording starts risking a memory-pressure kill. Nothing caps the
+    /// buffer yet, and the encode-time metrics line never prints if the process dies first, so
+    /// without this a jetsam kill looks like a clean run that simply stopped.
+    private static let memoryWarningBytes = 1_500_000_000
+
     private var frames: [(CGImage, CMTime)] = []
     private var lastStoredTimestamp: CMTime?
     private var deliveredCount = 0
+    private var bufferedBytes = 0
     private var parameters: RecordingParameters?
     private var isActive = false
 
@@ -83,6 +89,12 @@ final class CapturedFrames: @unchecked Sendable {
         }
         lastStoredTimestamp = timestamp
         frames.append((image, timestamp))
+
+        let wasBelowWarning = bufferedBytes <= Self.memoryWarningBytes
+        bufferedBytes += image.width * image.height * 4
+        if wasBelowWarning, bufferedBytes > Self.memoryWarningBytes {
+            captureLog.warning("recording has \(self.frames.count) frames buffered (~\(self.bufferedBytes / 1_000_000, privacy: .public) MB); a long recording can be killed for memory pressure before it is encoded")
+        }
     }
 
     private func duration() -> Double {
@@ -94,6 +106,7 @@ final class CapturedFrames: @unchecked Sendable {
         frames.removeAll()
         lastStoredTimestamp = nil
         deliveredCount = 0
+        bufferedBytes = 0
         parameters = nil
         isActive = false
     }
