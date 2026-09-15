@@ -304,7 +304,7 @@ final class Recorder: NSObject, SCStreamOutput {
             config.sourceRect = geometry.sourceRect
             config.width = geometry.outputWidth
             config.height = geometry.outputHeight
-            captureLog.info("starting capture on display \(selection.displayID, privacy: .private) source \(String(describing: geometry.sourceRect), privacy: .private) output \(geometry.outputWidth, privacy: .public)x\(geometry.outputHeight, privacy: .public) scale \(scale, privacy: .public) fps \(parameters.fps, privacy: .public)")
+            captureLog.notice("starting capture on display \(selection.displayID, privacy: .public) source \(String(describing: geometry.sourceRect), privacy: .public) output \(geometry.outputWidth, privacy: .public)x\(geometry.outputHeight, privacy: .public) scale \(scale, privacy: .public) fps \(parameters.fps, privacy: .public)")
 
         case .window(let window):
             guard let scWindow = content.windows.first(where: { $0.windowID == window.windowID }) else {
@@ -322,7 +322,7 @@ final class Recorder: NSObject, SCStreamOutput {
             )
             config.width = size.width
             config.height = size.height
-            captureLog.info("starting capture on window \(window.windowID, privacy: .public) source \(String(describing: scWindow.frame), privacy: .private) output \(size.width, privacy: .public)x\(size.height, privacy: .public) scale \(scale, privacy: .public) fps \(parameters.fps, privacy: .public)")
+            captureLog.notice("starting capture on window \(window.windowID, privacy: .public) source \(String(describing: scWindow.frame), privacy: .public) output \(size.width, privacy: .public)x\(size.height, privacy: .public) scale \(scale, privacy: .public) fps \(parameters.fps, privacy: .public)")
         }
 
         let stream = SCStream(filter: filter, configuration: config, delegate: self)
@@ -377,7 +377,7 @@ final class Recorder: NSObject, SCStreamOutput {
             let url = try GIFWriter.write(frames: frames, fps: summary.parameters.fps, outputDirectory: outputDirectory)
             let elapsed = Date().timeIntervalSince(startedAt)
             let effectiveFPS = summary.duration > 0 ? Double(frames.count) / summary.duration : 0
-            captureLog.info("\(metricsLine(summary: summary, written: frames.count, dimensions: dimensions, encodeSeconds: elapsed, effectiveFPS: effectiveFPS), privacy: .public)")
+            captureLog.notice("\(metricsLine(summary: summary, written: frames.count, dimensions: dimensions, encodeSeconds: elapsed, effectiveFPS: effectiveFPS), privacy: .public)")
             return .success(url)
         } catch {
             captureLog.error("GIF encoding failed: \(String(describing: error), privacy: .public)")
