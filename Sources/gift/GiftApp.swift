@@ -14,11 +14,20 @@ final class GiftApp: NSObject, NSApplicationDelegate {
     private var settings = Settings.load()
     private var settingsController: SettingsWindowController?
     private var processingIndicator: NSProgressIndicator?
+    private var appearanceObservation: NSKeyValueObservation?
+    private var iconState: StatusIconState = .idle
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory) // Menu bar only, no Dock icon.
         setupMenuBar()
         applySettings()
+        // The status icon resolves its colors when it is built, so a light/dark switch needs a rebuild.
+        appearanceObservation = NSApp.observe(\.effectiveAppearance) { [weak self] _, _ in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                self.updateStatusIcon(self.iconState)
+            }
+        }
         if !settings.hasCompletedInitialSetup {
             showSettings(initialSetup: true)
         }
@@ -242,6 +251,7 @@ final class GiftApp: NSObject, NSApplicationDelegate {
     }
 
     private func updateStatusIcon(_ state: StatusIconState) {
+        iconState = state
         guard let button = statusItem.button else { return }
         switch state {
         case .idle, .recording:

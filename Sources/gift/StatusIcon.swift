@@ -9,9 +9,10 @@ enum StatusIconState {
 enum StatusIcon {
     private static let size = NSSize(width: 18, height: 18)
 
-    /// Drawn with the drawing-handler initializer so the ring resolves `labelColor` against the
-    /// menu bar's current appearance. A hardcoded white ring disappears against a light menu bar.
-    /// The image stays non-template so the recording dot keeps its red.
+    /// Draws the ring with `labelColor` so it reads against either menu bar, and keeps the image
+    /// non-template so the recording dot stays red. NSImage caches the result of a drawing handler,
+    /// so this must be called again when the system appearance changes; `labelColor` is resolved
+    /// once, at the moment the image is built.
     static func image(for state: StatusIconState) -> NSImage {
         NSImage(size: size, flipped: false) { _ in
             let outerRect = NSRect(x: 2, y: 2, width: size.width - 4, height: size.height - 4)
