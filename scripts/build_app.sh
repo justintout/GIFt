@@ -152,9 +152,14 @@ echo "Done."
 echo "Zip to share: $ZIP_PATH"
 
 if [[ "$SIGN_IDENTITY" == "-" ]]; then
-  echo "Signature: ad-hoc — recipients should Control-click > Open on first launch."
+  echo "Signature: ad-hoc — recipients must approve it by hand, and macOS drops the"
+  echo "           Screen Recording grant every time the binary changes."
+elif [[ "$SIGN_IDENTITY" != *"Developer ID Application"* ]]; then
+  echo "Signature: $SIGN_IDENTITY"
+  echo "           A development signature. Stable across rebuilds, so permissions stick"
+  echo "           locally, but Gatekeeper blocks it for anyone else."
 elif [[ "$NOTARIZE" == true ]]; then
-  echo "Signature: Developer ID, notarized and stapled — this opens with a plain double-click."
+  echo "Signature: Developer ID, notarized and stapled — opens with a plain double-click."
   spctl --assess --type execute --verbose=2 "$APP_BUNDLE" 2>&1 || true
 else
   echo "Signature: Developer ID, not notarized — Gatekeeper will still block recipients."
