@@ -26,6 +26,14 @@ struct Settings: Codable {
         initialSetupVersion: 0
     )
 
+    enum CodingKeys: String, CodingKey {
+        case outputDirectory
+        case autoStartAfterSelection
+        case defaultFPS
+        case indicatorStyle
+        case initialSetupVersion
+    }
+
     private static let defaultsKey = "gift.settings"
 
     static func load() -> Settings {
@@ -53,6 +61,28 @@ struct Settings: Codable {
         }
         settings.indicatorStyle = settings.indicatorStyle.clamped()
         return settings
+    }
+}
+
+extension Settings {
+    /// Decoded a field at a time so a setting added in a later release cannot invalidate the whole
+    /// blob. A synthesized `Decodable` throws on a missing key, which would reset every existing
+    /// user's settings — including the output folder — the first time a field was added.
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let fallback = Settings.standard
+
+        func value<T: Decodable>(_ key: CodingKeys, or use: T) -> T {
+            (try? container.decodeIfPresent(T.self, forKey: key)) ?? use
+        }
+
+        self.init(
+            outputDirectory: value(.outputDirectory, or: fallback.outputDirectory),
+            autoStartAfterSelection: value(.autoStartAfterSelection, or: fallback.autoStartAfterSelection),
+            defaultFPS: value(.defaultFPS, or: fallback.defaultFPS),
+            indicatorStyle: value(.indicatorStyle, or: fallback.indicatorStyle),
+            initialSetupVersion: value(.initialSetupVersion, or: 0)
+        )
     }
 }
 

@@ -23,11 +23,12 @@ struct RecordingParameters: Sendable {
 
     var frameInterval: Double { 1.0 / Double(max(fps, 1)) }
 
-    /// ScreenCaptureKit aims for `frameInterval` but routinely lands a hair under it, and measured
-    /// delivery gaps sit exactly on the interval. Requiring a full interval would drop every other
-    /// on-schedule frame, halving the output rate. Accepting frames up to twice the requested rate
-    /// leaves the jitter alone while still capping a runaway delivery.
-    var minimumSpacing: Double { frameInterval * 0.5 }
+    /// ScreenCaptureKit aims for `frameInterval` but lands a hair under it, and measured delivery
+    /// gaps sit exactly on the interval. Requiring a full interval drops every other on-schedule
+    /// frame and halves the output rate; measured, an on-schedule gap clears this threshold by 25%.
+    /// Keeping the threshold here bounds how far the stored count can drift above the requested
+    /// rate, so the frame-rate setting stays meaningful instead of being a floor.
+    var minimumSpacing: Double { frameInterval * 0.75 }
 }
 
 /// Frames captured so far, plus the counters that explain what happened to them.
@@ -189,8 +190,8 @@ final class Recorder: NSObject, SCStreamOutput {
             do {
                 try await stream.stopCapture()
             } catch {
-                await self?.finish(.failure(error))
-                return
+                // Losing the teardown must not lose the recording, so encode what was captured.
+                captureLog.error("stopCapture failed; encoding captured frames anyway: \(String(describing: error), privacy: .public)")
             }
             guard let self else { return }
             let summary = self.takeCapturedFrames()

@@ -14,7 +14,7 @@ enum StatusIcon {
     /// so this must be called again when the system appearance changes; `labelColor` is resolved
     /// once, at the moment the image is built.
     static func image(for state: StatusIconState) -> NSImage {
-        NSImage(size: size, flipped: false) { _ in
+        let image = NSImage(size: size, flipped: false) { _ in
             let outerRect = NSRect(x: 2, y: 2, width: size.width - 4, height: size.height - 4)
             let outerPath = NSBezierPath(ovalIn: outerRect)
             NSColor.labelColor.setStroke()
@@ -36,6 +36,9 @@ enum StatusIcon {
             innerPath.stroke()
             return true
         }
+        // Explicit: a template image would be tinted by the system and the recording dot would lose its red.
+        image.isTemplate = false
+        return image
     }
 
     static func makeProcessingIndicator() -> NSProgressIndicator {

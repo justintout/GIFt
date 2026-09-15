@@ -9,6 +9,7 @@ final class GiftApp: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem!
     private var startItem: NSMenuItem!
     private var stopItem: NSMenuItem!
+    private var selectAreaItem: NSMenuItem!
     private var fpsItems: [NSMenuItem] = []
     private let indicatorWindow = SelectionIndicatorWindow()
     private var settings = Settings.load()
@@ -61,7 +62,8 @@ final class GiftApp: NSObject, NSApplicationDelegate {
         menu.addItem(stopItem)
         menu.addItem(.separator())
 
-        menu.addItem(NSMenuItem(title: "Select Area…", action: #selector(selectArea), keyEquivalent: ""))
+        selectAreaItem = NSMenuItem(title: "Select Area…", action: #selector(selectArea), keyEquivalent: "")
+        menu.addItem(selectAreaItem)
 
         let fpsMenu = NSMenu(title: "Frame Rate")
         for fps in Settings.allowedFrameRates {
@@ -109,8 +111,11 @@ final class GiftApp: NSObject, NSApplicationDelegate {
             startItem.isEnabled = false
             stopItem.isEnabled = false
         }
-        // The frame rate is frozen for the duration of a recording.
-        fpsItems.forEach { $0.isEnabled = recorder.state == .idle }
+        // The frame rate is frozen for the duration of a recording, and a new selection cannot be
+        // taken while one is in flight.
+        let isIdle = recorder.state == .idle
+        fpsItems.forEach { $0.isEnabled = isIdle }
+        selectAreaItem.isEnabled = isIdle
     }
 
     @objc private func startRecording() {
@@ -129,13 +134,16 @@ final class GiftApp: NSObject, NSApplicationDelegate {
             return
         }
 
+        // Enabled before the capture starts, because preparing it can take seconds and this is the
+        // only way out until the stream is running.
+        EscTap.shared.enable { [weak self] in self?.cancelRecording() }
+
         recorder.start { [weak self] status in
             guard let self else { return }
             appLog.info("recorder emitted status: \(status, privacy: .public)")
             self.updateMenuState()
             self.updateStatusIcon(.recording)
             self.indicatorWindow.setRecording(true)
-            EscTap.shared.enable { [weak self] in self?.cancelRecording() }
         } completion: { [weak self] result in
             guard let self else { return }
             self.updateMenuState()
