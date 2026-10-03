@@ -3,23 +3,24 @@ import CoreMedia
 import GiftCore
 
 /// Shown after a recording stops, before anything is written: trim either end and pick an output
-/// size. The frames are still in memory, so trimming never re-encodes a GIF.
+/// size and format. The frames are still in memory, so trimming never re-encodes anything.
 @MainActor
 final class RecordingEditorController: NSWindowController {
     private static let scales: [Double] = [1, 0.75, 0.5, 0.25]
     private static let maximumPreviewSize = NSSize(width: 720, height: 450)
 
     private let recording: Recording
-    private let onFinish: (RecordingEditorController, FrameEdit?) -> Void
+    private let onFinish: (RecordingEditorController, (edit: FrameEdit, format: ExportFormat)?) -> Void
     private let imageView = NSImageView()
     private let trimSlider: TrimSlider
     private let rangeLabel = NSTextField(labelWithString: "")
     private let scalePopup = NSPopUpButton()
+    private let formatPopup = NSPopUpButton()
     private let sizeLabel = NSTextField(labelWithString: "")
     private var estimateTask: Task<Void, Never>?
 
-    /// - Parameter onFinish: Called once, with the edit to save or `nil` when the user discards.
-    init(recording: Recording, onFinish: @escaping (RecordingEditorController, FrameEdit?) -> Void) {
+    /// - Parameter onFinish: Called once, with what to save or `nil` when the user discards.
+    init(recording: Recording, format: ExportFormat, onFinish: @escaping (RecordingEditorController, (edit: FrameEdit, format: ExportFormat)?) -> Void) {
         precondition(!recording.frames.isEmpty, "the recorder never hands over an empty recording")
         self.recording = recording
         self.onFinish = onFinish
@@ -31,6 +32,7 @@ final class RecordingEditorController: NSWindowController {
         window.isReleasedWhenClosed = false
         super.init(window: window)
         setupUI()
+        formatPopup.selectItem(at: ExportFormat.allCases.firstIndex(of: format) ?? 0)
         show(frame: 0)
         updateRangeLabel()
         refreshEstimate()
@@ -49,6 +51,10 @@ final class RecordingEditorController: NSWindowController {
 
     private var edit: FrameEdit {
         FrameEdit(range: trimSlider.range, scale: Self.scales[scalePopup.indexOfSelectedItem])
+    }
+
+    private var format: ExportFormat {
+        ExportFormat.allCases[formatPopup.indexOfSelectedItem]
     }
 
     private func setupUI() {
@@ -70,10 +76,18 @@ final class RecordingEditorController: NSWindowController {
             scalePopup.addItem(withTitle: "\(Int(scale * 100))%  (\(size.width) × \(size.height))")
         }
         scalePopup.target = self
-        scalePopup.action = #selector(scaleChanged)
+        scalePopup.action = #selector(outputChanged)
 
-        let sizeRow = NSStackView(views: [NSTextField(labelWithString: "Size:"), scalePopup, sizeLabel])
+        formatPopup.addItems(withTitles: ExportFormat.allCases.map(\.displayName))
+        formatPopup.target = self
+        formatPopup.action = #selector(outputChanged)
+
+        let sizeRow = NSStackView(views: [
+            NSTextField(labelWithString: "Format:"), formatPopup,
+            NSTextField(labelWithString: "Size:"), scalePopup, sizeLabel
+        ])
         sizeRow.spacing = 8
+        sizeRow.setCustomSpacing(16, after: formatPopup)
 
         let discardButton = NSButton(title: "Discard", target: self, action: #selector(discard))
         discardButton.keyEquivalent = "\u{1b}"
@@ -134,6 +148,7 @@ final class RecordingEditorController: NSWindowController {
         estimateTask?.cancel()
         sizeLabel.stringValue = "Estimating…"
         let edit = self.edit
+        let format = self.format
         let frames = recording.frames
         let fps = recording.fps
 
@@ -141,7 +156,7 @@ final class RecordingEditorController: NSWindowController {
             try? await Task.sleep(for: .milliseconds(250))
             guard !Task.isCancelled else { return }
             let bytes = await Task.detached(priority: .utility) {
-                try? edit.estimatedByteCount(of: frames, fps: fps)
+                try? await edit.estimatedByteCount(of: frames, fps: fps, format: format)
             }.value
             guard !Task.isCancelled, let self else { return }
             self.sizeLabel.stringValue = bytes.map {
@@ -150,22 +165,22 @@ final class RecordingEditorController: NSWindowController {
         }
     }
 
-    @objc private func scaleChanged() {
+    @objc private func outputChanged() {
         refreshEstimate()
     }
 
     @objc private func save() {
-        finish(with: edit)
+        finish(with: (edit, format))
     }
 
     @objc private func discard() {
         finish(with: nil)
     }
 
-    private func finish(with edit: FrameEdit?) {
+    private func finish(with choice: (edit: FrameEdit, format: ExportFormat)?) {
         estimateTask?.cancel()
         window?.close()
-        onFinish(self, edit)
+        onFinish(self, choice)
     }
 }
 

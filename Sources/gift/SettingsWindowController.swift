@@ -1,4 +1,5 @@
 import AppKit
+import GiftCore
 import ServiceManagement
 
 @MainActor
@@ -14,6 +15,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     private let highlightClicksCheckbox = NSButton(checkboxWithTitle: "Highlight mouse clicks", target: nil, action: nil)
     private let launchAtLoginCheckbox = NSButton(checkboxWithTitle: "Open GIFt at login", target: nil, action: nil)
     private let fpsPopup = NSPopUpButton()
+    private let formatPopup = NSPopUpButton()
     private let shortcutRecorder = ShortcutRecorderView()
     private let indicatorColorWell = NSColorWell()
     private let opacitySlider = NSSlider()
@@ -165,6 +167,10 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         fpsPopup.addItems(withTitles: Settings.allowedFrameRates.map(String.init))
         fpsPopup.autoenablesItems = false
         fpsRow.addArrangedSubview(fpsPopup)
+        fpsRow.addArrangedSubview(NSTextField(labelWithString: "Save as:"))
+        formatPopup.addItems(withTitles: ExportFormat.allCases.map(\.displayName))
+        fpsRow.addArrangedSubview(formatPopup)
+        fpsRow.setCustomSpacing(16, after: fpsPopup)
         stack.addArrangedSubview(fpsRow)
 
         let shortcutRow = NSStackView()
@@ -330,6 +336,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
             fpsPopup.selectItem(at: index)
         }
         shortcutRecorder.shortcut = settings.stopShortcut
+        formatPopup.selectItem(at: ExportFormat.allCases.firstIndex(of: settings.exportFormat) ?? 0)
         indicatorColorWell.color = settings.indicatorStyle.color
         opacitySlider.doubleValue = Double(settings.indicatorStyle.fillOpacity)
         borderWidthSlider.doubleValue = Double(settings.indicatorStyle.borderWidth)
@@ -450,6 +457,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         if let title = fpsPopup.selectedItem?.title, let fps = Int(title) {
             settings.defaultFPS = fps
         }
+        settings.exportFormat = ExportFormat.allCases[formatPopup.indexOfSelectedItem]
         settings.indicatorStyle = IndicatorStyle(
             color: indicatorColorWell.color,
             fillOpacity: CGFloat(opacitySlider.doubleValue),
