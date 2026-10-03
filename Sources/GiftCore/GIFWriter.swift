@@ -44,7 +44,7 @@ public enum GIFWriter {
     ) throws -> URL {
         guard !frames.isEmpty else { throw GIFWritingError.noFrames }
         try fileManager.createDirectory(at: outputDirectory, withIntermediateDirectories: true)
-        let url = nextOutputURL(outputDirectory: outputDirectory, now: now, fileManager: fileManager)
+        let url = nextOutputURL(outputDirectory: outputDirectory, pathExtension: "gif", now: now, fileManager: fileManager)
 
         // Encode beside the destination, then move it into place, so a failed encode
         // cannot leave a truncated GIF in the user's output folder.
@@ -140,12 +140,13 @@ public enum GIFWriter {
         return max(hundredths * delayQuantum, minimumDelay)
     }
 
-    private static func nextOutputURL(outputDirectory: URL, now: Date, fileManager: FileManager) -> URL {
+    /// `gift-<milliseconds>.<extension>`, with a numeric suffix when that name is taken.
+    static func nextOutputURL(outputDirectory: URL, pathExtension: String, now: Date, fileManager: FileManager) -> URL {
         let milliseconds = Int((now.timeIntervalSince1970 * 1000).rounded())
-        var url = outputDirectory.appendingPathComponent("gift-\(milliseconds).gif")
+        var url = outputDirectory.appendingPathComponent("gift-\(milliseconds).\(pathExtension)")
         var suffix = 1
         while fileManager.fileExists(atPath: url.path) {
-            url = outputDirectory.appendingPathComponent("gift-\(milliseconds)-\(suffix).gif")
+            url = outputDirectory.appendingPathComponent("gift-\(milliseconds)-\(suffix).\(pathExtension)")
             suffix += 1
         }
         return url
