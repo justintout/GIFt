@@ -9,6 +9,8 @@ struct Settings: Codable {
     var outputDirectory: URL
     var autoStartAfterSelection: Bool
     var bringWindowToFront: Bool
+    var reviewBeforeSaving: Bool
+    var highlightClicks: Bool
     var stopShortcut: KeyboardShortcut
     var defaultFPS: Int
     var indicatorStyle: IndicatorStyle
@@ -24,6 +26,8 @@ struct Settings: Codable {
             ?? FileManager.default.homeDirectoryForCurrentUser,
         autoStartAfterSelection: true,
         bringWindowToFront: true,
+        reviewBeforeSaving: true,
+        highlightClicks: true,
         stopShortcut: .default,
         defaultFPS: defaultFrameRate,
         indicatorStyle: .default,
@@ -34,6 +38,8 @@ struct Settings: Codable {
         case outputDirectory
         case autoStartAfterSelection
         case bringWindowToFront
+        case reviewBeforeSaving
+        case highlightClicks
         case stopShortcut
         case defaultFPS
         case indicatorStyle
@@ -88,6 +94,8 @@ extension Settings {
             outputDirectory: value(.outputDirectory, or: fallback.outputDirectory),
             autoStartAfterSelection: value(.autoStartAfterSelection, or: fallback.autoStartAfterSelection),
             bringWindowToFront: value(.bringWindowToFront, or: fallback.bringWindowToFront),
+            reviewBeforeSaving: value(.reviewBeforeSaving, or: fallback.reviewBeforeSaving),
+            highlightClicks: value(.highlightClicks, or: fallback.highlightClicks),
             stopShortcut: value(.stopShortcut, or: fallback.stopShortcut),
             defaultFPS: value(.defaultFPS, or: fallback.defaultFPS),
             indicatorStyle: value(.indicatorStyle, or: fallback.indicatorStyle),

@@ -11,7 +11,6 @@ struct SelectionContext: @unchecked Sendable {
     let displayFrame: CGRect
     let displayID: CGDirectDisplayID
     let fallbackPointPixelScale: CGFloat
-    let excludedWindowID: CGWindowID?
 }
 
 /// A single window to record, stored by ID rather than by `SCWindow` so it stays valid after the
@@ -38,29 +37,36 @@ struct RecordingParameters: Sendable {
     var minimumSpacing: Double { frameInterval * 0.75 }
 }
 
+/// A finished capture, not yet written to disk.
+struct Recording: Sendable {
+    let frames: [GIFFrame]
+    let fps: Int
+    /// Complete frames ScreenCaptureKit offered, before the throttle dropped any.
+    let deliveredCount: Int
+    /// Seconds from the first stored frame to the last, not counting pauses.
+    let duration: Double
+}
+
 /// Frames captured so far, plus the counters that explain what happened to them.
 /// Every access happens on the recorder's capture queue.
 final class CapturedFrames: @unchecked Sendable {
-    struct Summary {
-        let frames: [(CGImage, CMTime)]
-        let parameters: RecordingParameters
-        /// Complete frames ScreenCaptureKit offered, before the throttle dropped any.
-        let deliveredCount: Int
-        /// Seconds from the first stored frame to the last.
-        let duration: Double
-    }
-
     /// Roughly where a long recording starts risking a memory-pressure kill. Nothing caps the
     /// buffer yet, and the encode-time metrics line never prints if the process dies first, so
     /// without this a jetsam kill looks like a clean run that simply stopped.
     private static let memoryWarningBytes = 1_500_000_000
 
-    private var frames: [(CGImage, CMTime)] = []
+    private var frames: [GIFFrame] = []
     private var lastStoredTimestamp: CMTime?
     private var deliveredCount = 0
     private var bufferedBytes = 0
     private var parameters: RecordingParameters?
     private var isActive = false
+    private var pausedAt: CMTime?
+    /// Time spent paused so far, subtracted from every later timestamp so the GIF plays straight
+    /// through each pause. Measured on the host clock; only the length is used, so it does not
+    /// matter whether frame timestamps share that clock's origin.
+    private var pausedDuration = CMTime.zero
+    private var clicks: [Click] = []
 
     func begin(parameters: RecordingParameters) {
         reset()
@@ -72,30 +78,46 @@ final class CapturedFrames: @unchecked Sendable {
         reset()
     }
 
-    func finish() -> Summary? {
+    func finish() -> Recording? {
         guard let parameters, isActive else { return nil }
-        let summary = Summary(
+        let recording = Recording(
             frames: frames,
-            parameters: parameters,
+            fps: parameters.fps,
             deliveredCount: deliveredCount,
             duration: duration()
         )
         reset()
-        return summary
+        return recording
+    }
+
+    func setPaused(_ paused: Bool) {
+        let now = CMClockGetTime(CMClockGetHostTimeClock())
+        if paused, pausedAt == nil {
+            pausedAt = now
+        } else if !paused, let pausedAt {
+            pausedDuration = pausedDuration + (now - pausedAt)
+            self.pausedAt = nil
+        }
+    }
+
+    func addClick(_ click: Click) {
+        guard isActive, pausedAt == nil else { return }
+        clicks.append(click)
     }
 
     /// Drop frames only when they arrive well ahead of the target interval. This caps how much a
     /// misbehaving capture can make us hold, without second-guessing normal delivery jitter.
     func append(_ image: CGImage, at timestamp: CMTime) {
-        guard isActive, let parameters else { return }
+        guard isActive, pausedAt == nil, let parameters else { return }
         deliveredCount += 1
 
+        let timestamp = timestamp - pausedDuration
         if let lastStoredTimestamp {
             let elapsed = CMTimeGetSeconds(timestamp - lastStoredTimestamp)
             guard elapsed.isFinite, elapsed >= parameters.minimumSpacing else { return }
         }
         lastStoredTimestamp = timestamp
-        frames.append((image, timestamp))
+        frames.append(GIFFrame(image: highlightingClicks(on: image), timestamp: timestamp))
 
         let wasBelowWarning = bufferedBytes <= Self.memoryWarningBytes
         bufferedBytes += image.width * image.height * 4
@@ -104,8 +126,22 @@ final class CapturedFrames: @unchecked Sendable {
         }
     }
 
+    /// Clicks are timed on the host clock when they happen, so the frame is timed on the same clock
+    /// as it arrives rather than by its own timestamp.
+    private func highlightingClicks(on image: CGImage) -> CGImage {
+        let now = CMClockGetTime(CMClockGetHostTimeClock())
+        clicks.removeAll { CMTimeGetSeconds(now - $0.time) >= ClickHighlighter.duration }
+        guard !clicks.isEmpty else { return image }
+        do {
+            return try ClickHighlighter.draw(clicks, at: now, on: image)
+        } catch {
+            captureLog.error("could not draw click highlights; keeping the frame without them: \(String(describing: error), privacy: .public)")
+            return image
+        }
+    }
+
     private func duration() -> Double {
-        guard let first = frames.first?.1, let last = frames.last?.1 else { return 0 }
+        guard let first = frames.first?.timestamp, let last = frames.last?.timestamp else { return 0 }
         return CMTimeGetSeconds(last - first)
     }
 
@@ -116,6 +152,9 @@ final class CapturedFrames: @unchecked Sendable {
         bufferedBytes = 0
         parameters = nil
         isActive = false
+        pausedAt = nil
+        pausedDuration = .zero
+        clicks.removeAll()
     }
 }
 
@@ -154,13 +193,15 @@ final class Recorder: NSObject, SCStreamOutput {
     private static let highFrameRateGIFPixelDimension = 960
 
     private(set) var state: State = .idle
+    private(set) var isPaused = false
     var fps: Int = Settings.defaultFrameRate
-    var outputDirectory: URL = Settings.standard.outputDirectory
+    var highlightsClicks = Settings.standard.highlightClicks
     var hasTarget: Bool { target != nil }
 
     private var target: Target?
     private var stream: SCStream?
-    private var completionHandler: ((Result<URL, Error>) -> Void)?
+    private var clickMonitor: Any?
+    private var completionHandler: ((Result<Recording, Error>) -> Void)?
     /// Identifies the recording currently in flight. Encoding runs off the main actor and can
     /// outlive its recording — a stream error sets the recorder idle while the encode is still
     /// running, which lets the next recording start. Results carry their session so a late one
@@ -172,15 +213,14 @@ final class Recorder: NSObject, SCStreamOutput {
     private let renderContext = CIContext(options: [.useSoftwareRenderer: false])
 
     @discardableResult
-    func setSelection(rect: CGRect, on screen: NSScreen, excludedWindowID: CGWindowID?) throws -> CGRect {
+    func setSelection(rect: CGRect, on screen: NSScreen) throws -> CGRect {
         let display = DisplayGeometry(frame: screen.frame, pointPixelScale: screen.backingScaleFactor)
         let geometry = try CaptureGeometryCalculator.geometry(for: rect, on: display)
         target = .region(SelectionContext(
             selectionRect: geometry.selectionRect,
             displayFrame: screen.frame,
             displayID: screen.displayID,
-            fallbackPointPixelScale: screen.backingScaleFactor,
-            excludedWindowID: excludedWindowID
+            fallbackPointPixelScale: screen.backingScaleFactor
         ))
         return geometry.selectionRect
     }
@@ -190,7 +230,8 @@ final class Recorder: NSObject, SCStreamOutput {
     /// region, so the window can be moved afterwards without changing what is recorded.
     @discardableResult
     func setWindow(windowID: CGWindowID) async throws -> CGRect {
-        let content = try await SCShareableContent.current
+        // Off-screen windows included, so GIFt is listed even before any of its windows is visible.
+        let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: false)
         guard let window = content.windows.first(where: { $0.windowID == windowID }) else {
             throw RecorderError.windowUnavailable
         }
@@ -203,7 +244,7 @@ final class Recorder: NSObject, SCStreamOutput {
         return frame
     }
 
-    func start(status: @escaping (String) -> Void, completion: @escaping (Result<URL, Error>) -> Void) {
+    func start(status: @escaping (String) -> Void, completion: @escaping (Result<Recording, Error>) -> Void) {
         guard state == .idle else {
             captureLog.error("start called while \(String(describing: self.state), privacy: .public); ignoring")
             return
@@ -238,20 +279,29 @@ final class Recorder: NSObject, SCStreamOutput {
     func stop() {
         guard state == .recording, let stream, let session else { return }
         state = .stopping
-        let outputDirectory = self.outputDirectory
 
         Task.detached(priority: .userInitiated) { [weak self] in
             do {
                 try await stream.stopCapture()
             } catch {
-                // Losing the teardown must not lose the recording, so encode what was captured.
-                captureLog.error("stopCapture failed; encoding captured frames anyway: \(String(describing: error), privacy: .public)")
+                // Losing the teardown must not lose the recording, so keep what was captured.
+                captureLog.error("stopCapture failed; keeping captured frames anyway: \(String(describing: error), privacy: .public)")
             }
             guard let self else { return }
-            let summary = self.takeCapturedFrames()
-            let result = Self.encode(summary: summary, outputDirectory: outputDirectory)
+            let result: Result<Recording, Error>
+            if let recording = self.takeCapturedFrames(), !recording.frames.isEmpty {
+                result = .success(recording)
+            } else {
+                result = .failure(GIFWritingError.noFrames)
+            }
             await self.finish(result, session: session)
         }
+    }
+
+    func setPaused(_ paused: Bool) {
+        guard state == .recording, paused != isPaused else { return }
+        isPaused = paused
+        captureQueue.async { [captureBuffer] in captureBuffer.setPaused(paused) }
     }
 
     func cancel() {
@@ -292,8 +342,14 @@ final class Recorder: NSObject, SCStreamOutput {
             guard let display = content.displays.first(where: { $0.displayID == selection.displayID }) else {
                 throw RecorderError.streamSetupFailed
             }
-            let excludedWindows = content.windows.filter { $0.windowID == selection.excludedWindowID }
-            filter = SCContentFilter(display: display, excludingWindows: excludedWindows)
+            // Excluding the whole app covers windows opened after the capture starts too: the
+            // outline, the recording controls, and any GIFt window dragged over the area.
+            let ownProcessID = ProcessInfo.processInfo.processIdentifier
+            let ownApplication = content.applications.filter { $0.processID == ownProcessID }
+            if ownApplication.isEmpty {
+                captureLog.error("GIFt is missing from the shareable content; its own windows may appear in the recording")
+            }
+            filter = SCContentFilter(display: display, excludingApplications: ownApplication, exceptingWindows: [])
 
             let scale = Self.pointPixelScale(of: filter, fallback: selection.fallbackPointPixelScale)
             let geometry = try CaptureGeometryCalculator.geometry(
@@ -335,6 +391,53 @@ final class Recorder: NSObject, SCStreamOutput {
         }
         self.stream = stream
         state = .recording
+        if highlightsClicks {
+            startClickMonitor(target: target)
+        }
+    }
+
+    // MARK: Clicks
+
+    /// Mouse-down events from other applications need no permission, unlike key events. Clicks on
+    /// GIFt's own windows, such as the pause button, are never reported here.
+    private func startClickMonitor(target: Target) {
+        clickMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] _ in
+            // Global monitors call back on the main thread.
+            MainActor.assumeIsolated { self?.recordClick(target: target) }
+        }
+    }
+
+    private func stopClickMonitor() {
+        if let clickMonitor {
+            NSEvent.removeMonitor(clickMonitor)
+        }
+        clickMonitor = nil
+    }
+
+    private func recordClick(target: Target) {
+        let time = CMClockGetTime(CMClockGetHostTimeClock())
+        guard !isPaused, let frame = Self.currentFrame(of: target), frame.width > 0, frame.height > 0 else { return }
+
+        let mouse = NSEvent.mouseLocation
+        let location = CGPoint(x: (mouse.x - frame.minX) / frame.width, y: (mouse.y - frame.minY) / frame.height)
+        guard (0...1).contains(location.x), (0...1).contains(location.y) else { return }
+        captureQueue.async { [captureBuffer] in
+            captureBuffer.addClick(Click(location: location, time: time))
+        }
+    }
+
+    /// Where the recorded content is on screen now, in AppKit coordinates. A window can move during
+    /// a recording, so its frame is looked up for each click.
+    private static func currentFrame(of target: Target) -> CGRect? {
+        switch target {
+        case .region(let selection):
+            return selection.selectionRect
+        case .window(let window):
+            guard let info = (CGWindowListCopyWindowInfo(.optionIncludingWindow, window.windowID) as? [[String: Any]])?.first,
+                  let bounds = info[kCGWindowBounds as String] as? NSDictionary,
+                  let frame = CGRect(dictionaryRepresentation: bounds) else { return nil }
+            return NSScreen.appKitBounds(fromWindowBounds: frame)
+        }
     }
 
     nonisolated func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of type: SCStreamOutputType) {
@@ -360,47 +463,8 @@ final class Recorder: NSObject, SCStreamOutput {
         }
     }
 
-    // MARK: Encoding
-
-    private nonisolated func takeCapturedFrames() -> CapturedFrames.Summary? {
+    private nonisolated func takeCapturedFrames() -> Recording? {
         captureQueue.sync { captureBuffer.finish() }
-    }
-
-    private nonisolated static func encode(summary: CapturedFrames.Summary?, outputDirectory: URL) -> Result<URL, Error> {
-        guard let summary else { return .failure(RecorderError.noSelection) }
-
-        let frames = summary.frames.map { GIFFrame(image: $0.0, timestamp: $0.1) }
-        let dimensions = frames.first.map { "\($0.image.width)x\($0.image.height)" } ?? "none"
-        let startedAt = Date()
-
-        do {
-            let url = try GIFWriter.write(frames: frames, fps: summary.parameters.fps, outputDirectory: outputDirectory)
-            let elapsed = Date().timeIntervalSince(startedAt)
-            let effectiveFPS = summary.duration > 0 ? Double(frames.count) / summary.duration : 0
-            captureLog.notice("\(metricsLine(summary: summary, written: frames.count, dimensions: dimensions, encodeSeconds: elapsed, effectiveFPS: effectiveFPS), privacy: .public)")
-            return .success(url)
-        } catch {
-            captureLog.error("GIF encoding failed: \(String(describing: error), privacy: .public)")
-            return .failure(error)
-        }
-    }
-
-    /// One line per recording with everything needed to tell a capture drop apart from a slow
-    /// encode apart from wrong frame delays.
-    private nonisolated static func metricsLine(
-        summary: CapturedFrames.Summary,
-        written: Int,
-        dimensions: String,
-        encodeSeconds: Double,
-        effectiveFPS: Double
-    ) -> String {
-        let stored = summary.frames.count
-        let dropped = summary.deliveredCount - stored
-        return String(
-            format: "recording delivered=%d stored=%d written=%d dropped=%d span=%.2fs output=%@ fps=%d encode=%.2fs effectiveFPS=%.2f",
-            summary.deliveredCount, stored, written, dropped, summary.duration,
-            dimensions, summary.parameters.fps, encodeSeconds, effectiveFPS
-        )
     }
 
     /// ScreenCaptureKit reports a filter's own point-to-pixel scale from macOS 14 on. Before
@@ -417,13 +481,15 @@ final class Recorder: NSObject, SCStreamOutput {
         fps >= highFrameRateThreshold ? highFrameRateGIFPixelDimension : standardGIFPixelDimension
     }
 
-    private func finish(_ result: Result<URL, Error>, session: UUID) {
+    private func finish(_ result: Result<Recording, Error>, session: UUID) {
         guard session == self.session else {
             captureLog.info("ignoring a result from a superseded recording")
             return
         }
         self.session = nil
         stream = nil
+        stopClickMonitor()
+        isPaused = false
         state = .idle
         let completion = completionHandler
         completionHandler = nil

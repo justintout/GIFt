@@ -114,8 +114,6 @@ final class SelectionIndicatorWindow: NSWindow {
         }
     }
 
-    var windowID: CGWindowID { CGWindowID(windowNumber) }
-
     init() {
         super.init(contentRect: .zero, styleMask: .borderless, backing: .buffered, defer: false)
         level = .statusBar
