@@ -1,4 +1,5 @@
 import AppKit
+import GiftCore
 
 struct Settings: Codable {
     static let allowedFrameRates = [8, 10, 12, 15, 24, 30]
@@ -11,6 +12,7 @@ struct Settings: Codable {
     var bringWindowToFront: Bool
     var reviewBeforeSaving: Bool
     var highlightClicks: Bool
+    var exportFormat: ExportFormat
     var stopShortcut: KeyboardShortcut
     var defaultFPS: Int
     var indicatorStyle: IndicatorStyle
@@ -28,6 +30,7 @@ struct Settings: Codable {
         bringWindowToFront: true,
         reviewBeforeSaving: true,
         highlightClicks: true,
+        exportFormat: .gif,
         stopShortcut: .default,
         defaultFPS: defaultFrameRate,
         indicatorStyle: .default,
@@ -40,6 +43,7 @@ struct Settings: Codable {
         case bringWindowToFront
         case reviewBeforeSaving
         case highlightClicks
+        case exportFormat
         case stopShortcut
         case defaultFPS
         case indicatorStyle
@@ -96,6 +100,7 @@ extension Settings {
             bringWindowToFront: value(.bringWindowToFront, or: fallback.bringWindowToFront),
             reviewBeforeSaving: value(.reviewBeforeSaving, or: fallback.reviewBeforeSaving),
             highlightClicks: value(.highlightClicks, or: fallback.highlightClicks),
+            exportFormat: value(.exportFormat, or: fallback.exportFormat),
             stopShortcut: value(.stopShortcut, or: fallback.stopShortcut),
             defaultFPS: value(.defaultFPS, or: fallback.defaultFPS),
             indicatorStyle: value(.indicatorStyle, or: fallback.indicatorStyle),

@@ -187,7 +187,7 @@ final class GiftApp: NSObject, NSApplicationDelegate {
                 if self.settings.reviewBeforeSaving {
                     self.review(recording)
                 } else {
-                    self.save(recording, edit: .unchanged(frameCount: recording.frames.count))
+                    self.save(recording, edit: .unchanged(frameCount: recording.frames.count), format: self.settings.exportFormat)
                 }
             case .failure(let error):
                 if (error as? Recorder.RecorderError) != .canceled {
@@ -198,6 +198,7 @@ final class GiftApp: NSObject, NSApplicationDelegate {
     }
 
     @objc private func stopRecording() {
+        guard recorder.state == .recording else { return }
         indicatorWindow.hide()
         controlsPanel.hide()
         recorder.stop()
@@ -223,25 +224,25 @@ final class GiftApp: NSObject, NSApplicationDelegate {
     }
 
     private func review(_ recording: Recording) {
-        let editor = RecordingEditorController(recording: recording) { [weak self] editor, edit in
+        let editor = RecordingEditorController(recording: recording, format: settings.exportFormat) { [weak self] editor, choice in
             guard let self else { return }
             self.editors.removeAll { $0 === editor }
-            if let edit {
-                self.save(recording, edit: edit)
+            if let choice {
+                self.save(recording, edit: choice.edit, format: choice.format)
             }
         }
         editors.append(editor)
         editor.show()
     }
 
-    private func save(_ recording: Recording, edit: FrameEdit) {
+    private func save(_ recording: Recording, edit: FrameEdit, format: ExportFormat) {
         updateStatusIcon(.processing)
         let outputDirectory = settings.outputDirectory
 
         Task { [weak self] in
             let result: Result<URL, Error>
             do {
-                result = .success(try await RecordingExport.write(recording, edit: edit, to: outputDirectory))
+                result = .success(try await RecordingExport.write(recording, edit: edit, format: format, to: outputDirectory))
             } catch {
                 result = .failure(error)
             }
@@ -252,7 +253,7 @@ final class GiftApp: NSObject, NSApplicationDelegate {
             switch result {
             case .success(let url):
                 // The file itself rather than its path, so pasting into a chat or an issue
-                // attaches the GIF.
+                // attaches the recording.
                 NSPasteboard.general.clearContents()
                 NSPasteboard.general.writeObjects([url as NSURL])
                 self.showMessage("Saved and copied \(url.lastPathComponent)")

@@ -10,7 +10,8 @@ It is heavily inspired by [LICEcap](https://www.cockos.com/licecap/) but aims to
 - Pause and resume from buttons beside the recording outline
 - Review each recording before saving: trim either end and scale it down, with an estimated file size
 - Highlight mouse clicks
-- Copies the saved GIF to the clipboard, ready to paste into a chat or an issue
+- Save as GIF, or as MP4 for much smaller files when the recording has a lot of motion
+- Copies the saved file to the clipboard, ready to paste into a chat or an issue
 - Adjustable frame rate
 - A configurable shortcut to stop and save; Escape cancels
 - Optionally opens at login
