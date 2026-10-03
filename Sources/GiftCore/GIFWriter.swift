@@ -4,7 +4,8 @@ import Foundation
 import ImageIO
 import UniformTypeIdentifiers
 
-public struct GIFFrame {
+/// Unchecked because `CGImage` is immutable but not annotated as `Sendable`.
+public struct GIFFrame: @unchecked Sendable {
     public var image: CGImage
     public var timestamp: CMTime
 
@@ -58,11 +59,25 @@ public enum GIFWriter {
         return url
     }
 
+    /// The size the frames would occupy as a GIF, without writing a file.
+    public static func encodedByteCount(frames: [GIFFrame], fps: Int) throws -> Int {
+        guard !frames.isEmpty else { throw GIFWritingError.noFrames }
+        let data = NSMutableData()
+        guard let destination = CGImageDestinationCreateWithData(data as CFMutableData, UTType.gif.identifier as CFString, frames.count, nil) else {
+            throw GIFWritingError.destinationCreationFailed
+        }
+        try encode(frames: frames, fps: fps, into: destination)
+        return data.length
+    }
+
     private static func encode(frames: [GIFFrame], fps: Int, to url: URL) throws {
         guard let destination = CGImageDestinationCreateWithURL(url as CFURL, UTType.gif.identifier as CFString, frames.count, nil) else {
             throw GIFWritingError.destinationCreationFailed
         }
+        try encode(frames: frames, fps: fps, into: destination)
+    }
 
+    private static func encode(frames: [GIFFrame], fps: Int, into destination: CGImageDestination) throws {
         let gifProps: CFDictionary = [
             kCGImagePropertyGIFDictionary: [kCGImagePropertyGIFLoopCount: 0]
         ] as CFDictionary
