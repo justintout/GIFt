@@ -1,4 +1,5 @@
 import AppKit
+import GiftCore
 
 /// Menu bar app for capturing a screen region to a GIF file.
 @main
@@ -9,11 +10,14 @@ final class GiftApp: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem!
     private var startItem: NSMenuItem!
     private var stopItem: NSMenuItem!
+    private var pauseItem: NSMenuItem!
     private var selectAreaItem: NSMenuItem!
     private var selectWindowItem: NSMenuItem!
     private let windowMenu = NSMenu(title: "Select Window")
     private var fpsItems: [NSMenuItem] = []
     private let indicatorWindow = SelectionIndicatorWindow()
+    private let controlsPanel = RecordingControlsPanel()
+    private var editors: [RecordingEditorController] = []
     private var settings = Settings.load()
     private var settingsController: SettingsWindowController?
     private var processingIndicator: NSProgressIndicator?
@@ -24,6 +28,8 @@ final class GiftApp: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory) // Menu bar only, no Dock icon.
         setupMenuBar()
+        controlsPanel.onTogglePause = { [weak self] in self?.togglePause() }
+        controlsPanel.onStop = { [weak self] in self?.stopRecording() }
         applySettings()
         // The status icon resolves its colors when it is built, so a light/dark switch needs a rebuild.
         appearanceObservation = NSApp.observe(\.effectiveAppearance) { [weak self] _, _ in
@@ -66,8 +72,10 @@ final class GiftApp: NSObject, NSApplicationDelegate {
 
         startItem = NSMenuItem(title: "Start Recording", action: #selector(startRecording), keyEquivalent: "")
         stopItem = NSMenuItem(title: "Stop Recording", action: #selector(stopRecording), keyEquivalent: "")
+        pauseItem = NSMenuItem(title: "Pause Recording", action: #selector(togglePause), keyEquivalent: "")
         menu.addItem(startItem)
         menu.addItem(stopItem)
+        menu.addItem(pauseItem)
         menu.addItem(.separator())
 
         selectAreaItem = NSMenuItem(title: "Select Area…", action: #selector(selectArea), keyEquivalent: "")
@@ -118,14 +126,16 @@ final class GiftApp: NSObject, NSApplicationDelegate {
             startItem.isEnabled = false
             stopItem.isEnabled = false
         case .recording:
-            startItem.title = "Recording…"
+            startItem.title = recorder.isPaused ? "Paused" : "Recording…"
             startItem.isEnabled = false
             stopItem.isEnabled = true
         case .stopping:
-            startItem.title = "Processing GIF…"
+            startItem.title = "Stopping…"
             startItem.isEnabled = false
             stopItem.isEnabled = false
         }
+        pauseItem.title = recorder.isPaused ? "Resume Recording" : "Pause Recording"
+        pauseItem.isEnabled = recorder.state == .recording
         // The frame rate is frozen for the duration of a recording, and a target can only be
         // replaced while idle.
         fpsItems.forEach { $0.isEnabled = canChangeTarget }
@@ -163,19 +173,22 @@ final class GiftApp: NSObject, NSApplicationDelegate {
             self.updateMenuState()
             self.updateStatusIcon(.recording)
             self.indicatorWindow.setRecording(true)
+            self.controlsPanel.show(beside: self.indicatorWindow.frame)
         } completion: { [weak self] result in
             guard let self else { return }
             self.updateMenuState()
             self.updateStatusIcon(.idle)
             self.indicatorWindow.setRecording(false)
+            self.controlsPanel.hide()
             EscTap.shared.disable()
 
             switch result {
-            case .success(let url):
-                self.showMessage("Saved \(url.lastPathComponent)")
-                NSPasteboard.general.clearContents()
-                NSPasteboard.general.setString(url.path, forType: .string)
-                self.previewController.show(url: url)
+            case .success(let recording):
+                if self.settings.reviewBeforeSaving {
+                    self.review(recording)
+                } else {
+                    self.save(recording, edit: .unchanged(frameCount: recording.frames.count))
+                }
             case .failure(let error):
                 if (error as? Recorder.RecorderError) != .canceled {
                     self.showMessage("Error: \(error.localizedDescription)")
@@ -186,6 +199,7 @@ final class GiftApp: NSObject, NSApplicationDelegate {
 
     @objc private func stopRecording() {
         indicatorWindow.hide()
+        controlsPanel.hide()
         recorder.stop()
         updateMenuState()
         updateStatusIcon(.processing)
@@ -196,9 +210,57 @@ final class GiftApp: NSObject, NSApplicationDelegate {
         guard recorder.state == .recording || recorder.state == .starting else { return }
         recorder.cancel()
         indicatorWindow.setRecording(false)
+        controlsPanel.hide()
         updateMenuState()
         updateStatusIcon(.idle)
         EscTap.shared.disable()
+    }
+
+    @objc private func togglePause() {
+        recorder.setPaused(!recorder.isPaused)
+        controlsPanel.setPaused(recorder.isPaused)
+        updateMenuState()
+    }
+
+    private func review(_ recording: Recording) {
+        let editor = RecordingEditorController(recording: recording) { [weak self] editor, edit in
+            guard let self else { return }
+            self.editors.removeAll { $0 === editor }
+            if let edit {
+                self.save(recording, edit: edit)
+            }
+        }
+        editors.append(editor)
+        editor.show()
+    }
+
+    private func save(_ recording: Recording, edit: FrameEdit) {
+        updateStatusIcon(.processing)
+        let outputDirectory = settings.outputDirectory
+
+        Task { [weak self] in
+            let result: Result<URL, Error>
+            do {
+                result = .success(try await RecordingExport.write(recording, edit: edit, to: outputDirectory))
+            } catch {
+                result = .failure(error)
+            }
+            guard let self else { return }
+            // A new recording may have started while this one was encoding.
+            self.updateStatusIcon(self.recorder.state == .idle ? .idle : .recording)
+
+            switch result {
+            case .success(let url):
+                // The file itself rather than its path, so pasting into a chat or an issue
+                // attaches the GIF.
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.writeObjects([url as NSURL])
+                self.showMessage("Saved and copied \(url.lastPathComponent)")
+                self.previewController.show(url: url)
+            case .failure(let error):
+                self.showMessage("Error: \(error.localizedDescription)")
+            }
+        }
     }
 
     @objc private func selectArea() {
@@ -213,11 +275,7 @@ final class GiftApp: NSObject, NSApplicationDelegate {
             guard let self, let result else { return }
             appLog.info("selection returned rect \(String(describing: result.rect), privacy: .private) on display \(result.screen.displayID, privacy: .private)")
             do {
-                let selectedRect = try self.recorder.setSelection(
-                    rect: result.rect,
-                    on: result.screen,
-                    excludedWindowID: self.indicatorWindow.windowID
-                )
+                let selectedRect = try self.recorder.setSelection(rect: result.rect, on: result.screen)
                 self.indicatorWindow.show(rect: selectedRect, recording: false)
             } catch {
                 self.showMessage("Error: \(error.localizedDescription)")
@@ -328,7 +386,7 @@ final class GiftApp: NSObject, NSApplicationDelegate {
     }
 
     @objc private func openOutputFolder() {
-        NSWorkspace.shared.open(recorder.outputDirectory)
+        NSWorkspace.shared.open(settings.outputDirectory)
     }
 
     @objc private func openSettings() {
@@ -399,8 +457,8 @@ final class GiftApp: NSObject, NSApplicationDelegate {
     }
 
     private func applySettings() {
-        recorder.outputDirectory = settings.outputDirectory
         recorder.fps = settings.defaultFPS
+        recorder.highlightsClicks = settings.highlightClicks
         indicatorWindow.style = settings.indicatorStyle
         fpsItems.forEach { $0.state = ($0.tag == settings.defaultFPS) ? .on : .off }
         updateMenuState()

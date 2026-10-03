@@ -6,17 +6,18 @@ It is heavily inspired by [LICEcap](https://www.cockos.com/licecap/) but aims to
 
 ## Features
 
-- Quick screen recording to GIF
-- Easy sharing options
-- Simple and intuitive user interface
-- Lightweight and efficient performance
 - Record a selected screen area or a single window
-- Adjustable frame rate and quality settings
-- Support for keyboard shortcuts
+- Pause and resume from buttons beside the recording outline
+- Review each recording before saving: trim either end and scale it down, with an estimated file size
+- Highlight mouse clicks
+- Copies the saved GIF to the clipboard, ready to paste into a chat or an issue
+- Adjustable frame rate
+- A configurable shortcut to stop and save; Escape cancels
+- Optionally opens at login
 
 ## Privacy
 
-GIFt captures only the area or window you select after macOS Screen Recording permission is granted. Recordings are saved locally to the configured output folder; the app has no network dependencies and does not upload recordings or telemetry.
+GIFt captures only the area or window you select after macOS Screen Recording permission is granted. Its own windows, such as the outline and the pause button, never appear in a recording. Recordings are saved locally to the configured output folder; the app has no network dependencies and does not upload recordings or telemetry.
 
 Two further permissions are optional, and GIFt never prompts for either on its own. Both are listed in Settings with what they do:
 

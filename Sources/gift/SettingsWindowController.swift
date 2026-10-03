@@ -1,4 +1,5 @@
 import AppKit
+import ServiceManagement
 
 @MainActor
 final class SettingsWindowController: NSWindowController, NSWindowDelegate {
@@ -9,6 +10,9 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     private let pathField = NSTextField()
     private let autoStartCheckbox = NSButton(checkboxWithTitle: "Start recording immediately after selecting an area or window", target: nil, action: nil)
     private let bringWindowToFrontCheckbox = NSButton(checkboxWithTitle: "Bring the selected window to the front before recording", target: nil, action: nil)
+    private let reviewCheckbox = NSButton(checkboxWithTitle: "Review each recording before saving it", target: nil, action: nil)
+    private let highlightClicksCheckbox = NSButton(checkboxWithTitle: "Highlight mouse clicks", target: nil, action: nil)
+    private let launchAtLoginCheckbox = NSButton(checkboxWithTitle: "Open GIFt at login", target: nil, action: nil)
     private let fpsPopup = NSPopUpButton()
     private let shortcutRecorder = ShortcutRecorderView()
     private let indicatorColorWell = NSColorWell()
@@ -149,6 +153,9 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
 
         stack.addArrangedSubview(autoStartCheckbox)
         stack.addArrangedSubview(bringWindowToFrontCheckbox)
+        stack.addArrangedSubview(reviewCheckbox)
+        stack.addArrangedSubview(highlightClicksCheckbox)
+        stack.addArrangedSubview(launchAtLoginCheckbox)
 
         let fpsRow = NSStackView()
         fpsRow.orientation = .horizontal
@@ -314,6 +321,11 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         pathField.stringValue = settings.outputDirectory.path
         autoStartCheckbox.state = settings.autoStartAfterSelection ? .on : .off
         bringWindowToFrontCheckbox.state = settings.bringWindowToFront ? .on : .off
+        reviewCheckbox.state = settings.reviewBeforeSaving ? .on : .off
+        highlightClicksCheckbox.state = settings.highlightClicks ? .on : .off
+        // Read from the system rather than stored, because the user can also change it in
+        // System Settings > General > Login Items.
+        launchAtLoginCheckbox.state = SMAppService.mainApp.status == .enabled ? .on : .off
         if let index = fpsPopup.itemTitles.firstIndex(of: "\(settings.defaultFPS)") {
             fpsPopup.selectItem(at: index)
         }
@@ -403,12 +415,38 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         onSave(settings)
         onPermissionGranted = nil
         window?.performClose(nil)
+        applyLaunchAtLogin()
+    }
+
+    private func applyLaunchAtLogin() {
+        let wanted = launchAtLoginCheckbox.state == .on
+        let service = SMAppService.mainApp
+        guard wanted != (service.status == .enabled) else { return }
+
+        do {
+            if wanted {
+                try service.register()
+            } else {
+                try service.unregister()
+            }
+        } catch {
+            settingsLog.error("could not change launch at login: \(String(describing: error), privacy: .public)")
+            NSAlert(error: error).runModal()
+            return
+        }
+        // Registered, but the user has switched GIFt off in Login Items before; only they can
+        // switch it back on.
+        if wanted, service.status == .requiresApproval {
+            SMAppService.openSystemSettingsLoginItems()
+        }
     }
 
     private func updateSettingsFromControls() {
         settings.autoStartAfterSelection = (autoStartCheckbox.state == .on)
         settings.stopShortcut = shortcutRecorder.shortcut
         settings.bringWindowToFront = (bringWindowToFrontCheckbox.state == .on)
+        settings.reviewBeforeSaving = (reviewCheckbox.state == .on)
+        settings.highlightClicks = (highlightClicksCheckbox.state == .on)
         if let title = fpsPopup.selectedItem?.title, let fps = Int(title) {
             settings.defaultFPS = fps
         }
