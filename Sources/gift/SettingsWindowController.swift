@@ -112,9 +112,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         introLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         stack.addArrangedSubview(introLabel)
 
-        let permissionLabel = NSTextField(labelWithString: "Permissions")
-        permissionLabel.font = .boldSystemFont(ofSize: NSFont.systemFontSize)
-        stack.addArrangedSubview(permissionLabel)
+        addSectionHeader("Permissions")
 
         // Every permission the app can use is listed with what it buys, so nobody has to guess why
         // GIFt wants to watch keystrokes or reach into another application's windows.
@@ -130,9 +128,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
             stack.addArrangedSubview(makePermissionRow(row))
         }
 
-        let outputLabel = NSTextField(labelWithString: "Recording")
-        outputLabel.font = .boldSystemFont(ofSize: NSFont.systemFontSize)
-        stack.addArrangedSubview(outputLabel)
+        addSectionHeader("Recording")
 
         let pathRow = NSStackView()
         pathRow.orientation = .horizontal
@@ -141,7 +137,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
 
         pathRow.addArrangedSubview(NSTextField(labelWithString: "Output folder:"))
 
-        pathField.placeholderString = "Choose a folder..."
+        pathField.placeholderString = "Choose a folder…"
         pathField.isEditable = false
         pathField.isBezeled = true
         pathField.bezelStyle = .roundedBezel
@@ -149,7 +145,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         pathField.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         pathRow.addArrangedSubview(pathField)
 
-        let browseButton = NSButton(title: "Choose...", target: self, action: #selector(browse))
+        let browseButton = NSButton(title: "Choose…", target: self, action: #selector(browse))
         pathRow.addArrangedSubview(browseButton)
         stack.addArrangedSubview(pathRow)
 
@@ -195,9 +191,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         shortcutNote.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         stack.addArrangedSubview(shortcutNote)
 
-        let indicatorLabel = NSTextField(labelWithString: "Selection overlay")
-        indicatorLabel.font = .boldSystemFont(ofSize: NSFont.systemFontSize)
-        stack.addArrangedSubview(indicatorLabel)
+        addSectionHeader("Selection overlay")
 
         let colorRow = NSStackView()
         colorRow.orientation = .horizontal
@@ -234,15 +228,21 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         saveButton.action = #selector(save)
         saveButton.keyEquivalent = "\r"
 
-        buttonRow.addArrangedSubview(cancelButton)
-        buttonRow.addArrangedSubview(saveButton)
+        buttonRow.addView(cancelButton, in: .trailing)
+        buttonRow.addView(saveButton, in: .trailing)
+        stack.setCustomSpacing(20, after: stack.arrangedSubviews.last!)
         stack.addArrangedSubview(buttonRow)
 
         NSLayoutConstraint.activate([
             stack.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 16),
             stack.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -16),
             stack.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 16),
-            stack.bottomAnchor.constraint(lessThanOrEqualTo: contentView.bottomAnchor, constant: -16),
+            // Pinned on all sides, so the window takes its height from the content and shrinks
+            // when granted permissions hide their buttons.
+            stack.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -16),
+            stack.widthAnchor.constraint(equalToConstant: 528),
+            buttonRow.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            borderWidthSlider.leadingAnchor.constraint(equalTo: opacitySlider.leadingAnchor),
             introLabel.widthAnchor.constraint(equalTo: stack.widthAnchor),
             shortcutNote.widthAnchor.constraint(equalTo: stack.widthAnchor),
             pathField.widthAnchor.constraint(greaterThanOrEqualToConstant: 300),
@@ -255,12 +255,17 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         // The explanations wrap, so each needs the full width rather than its intrinsic one.
         NSLayoutConstraint.activate(permissionRows.map { $0.detailLabel.widthAnchor.constraint(equalTo: stack.widthAnchor) })
 
-        // Sized to the content rather than a fixed height, so adding a setting or a permission
-        // cannot silently clip the bottom of the window.
-        stack.layoutSubtreeIfNeeded()
-        window?.setContentSize(NSSize(width: 560, height: stack.fittingSize.height + 32))
-
         updateMode()
+    }
+
+    private func addSectionHeader(_ title: String) {
+        if let previous = stack.arrangedSubviews.last {
+            stack.setCustomSpacing(24, after: previous)
+        }
+        let label = NSTextField(labelWithString: title)
+        label.font = .boldSystemFont(ofSize: NSFont.systemFontSize)
+        stack.addArrangedSubview(label)
+        stack.setCustomSpacing(8, after: label)
     }
 
     /// One permission: its name, whether it is granted, what it buys, and how to get it.
@@ -309,6 +314,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         slider.setContentHuggingPriority(.defaultLow, for: .horizontal)
         row.addArrangedSubview(slider)
         valueLabel.alignment = .right
+        valueLabel.font = .monospacedDigitSystemFont(ofSize: NSFont.systemFontSize, weight: .regular)
         row.addArrangedSubview(valueLabel)
         return row
     }
