@@ -94,8 +94,11 @@ final class RecordingEditorController: NSWindowController {
         scalePopup.target = self
         scalePopup.action = #selector(outputChanged)
 
-        let sizeRow = NSStackView(views: [NSTextField(labelWithString: "Size:"), scalePopup, sizeLabel])
-        sizeRow.spacing = 8
+        for label in [rangeLabel, sizeLabel] {
+            label.font = .monospacedDigitSystemFont(ofSize: NSFont.systemFontSize, weight: .regular)
+            label.textColor = .secondaryLabelColor
+        }
+        sizeLabel.lineBreakMode = .byTruncatingTail
 
         let discardButton = NSButton(title: "Discard", target: self, action: #selector(discard))
         discardButton.keyEquivalent = "\u{1b}"
@@ -105,19 +108,43 @@ final class RecordingEditorController: NSWindowController {
             return button
         }
         choiceButtons.last?.keyEquivalent = "\r"
+        let copies = Array(choiceButtons[..<2])
+        let saves = Array(choiceButtons[2...])
 
-        // Gaps group the buttons: discarding stands apart, the two copies sit together, and each
-        // save gets its own room.
-        let buttonRow = NSStackView(views: [discardButton] + choiceButtons)
-        buttonRow.spacing = 20
-        buttonRow.setCustomSpacing(32, after: discardButton)
-        buttonRow.setCustomSpacing(8, after: choiceButtons[0])
+        // The preview sets the window's width, and the controls fit inside it. A narrow recording
+        // gets the buttons on two lines, and anything narrower than that is letterboxed.
+        let oneLineWidth = Self.width(of: [discardButton]) + Self.discardGap + Self.width(of: copies) + Self.pairGap + Self.width(of: saves)
+        let twoLineWidth = Self.width(of: [discardButton]) + Self.discardGap + max(Self.width(of: copies), Self.width(of: saves))
+        let width = max(previewSize.width, twoLineWidth)
 
-        let stack = NSStackView(views: [imageView, trimSlider, rangeLabel, sizeRow, buttonRow])
+        let buttonRows: [NSStackView]
+        if width >= oneLineWidth {
+            let row = Self.buttonRow(leading: discardButton, trailing: choiceButtons)
+            row.setCustomSpacing(Self.pairGap, after: copies[1])
+            buttonRows = [row]
+        } else {
+            buttonRows = [Self.buttonRow(leading: nil, trailing: copies), Self.buttonRow(leading: discardButton, trailing: saves)]
+        }
+
+        let sizeRow = NSStackView(views: [NSTextField(labelWithString: "Size:"), scalePopup])
+        sizeRow.alignment = .firstBaseline
+        sizeRow.spacing = 8
+        // The estimates sit beside the popup when the longest likely pair fits there.
+        let widestEstimate = NSTextField(labelWithString: "GIF about 999.9 MB  ·  MP4 about 999.9 MB")
+        widestEstimate.font = sizeLabel.font
+        let estimatesFitBeside = sizeRow.fittingSize.width + 8 + widestEstimate.fittingSize.width <= width
+        if estimatesFitBeside {
+            sizeRow.addArrangedSubview(sizeLabel)
+        }
+
+        let stack = NSStackView(views: [imageView, trimSlider, rangeLabel, sizeRow] + (estimatesFitBeside ? [] : [sizeLabel]) + buttonRows)
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = 12
         stack.setCustomSpacing(4, after: trimSlider)
+        stack.setCustomSpacing(4, after: sizeRow)
+        stack.setCustomSpacing(20, after: estimatesFitBeside ? sizeRow : sizeLabel)
+        stack.setCustomSpacing(8, after: buttonRows[0])
         stack.translatesAutoresizingMaskIntoConstraints = false
         contentView.addSubview(stack)
 
@@ -126,18 +153,42 @@ final class RecordingEditorController: NSWindowController {
             stack.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -16),
             stack.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 16),
             stack.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -16),
-            imageView.widthAnchor.constraint(equalToConstant: previewSize.width),
+            stack.widthAnchor.constraint(equalToConstant: width),
+            imageView.widthAnchor.constraint(equalTo: stack.widthAnchor),
             imageView.heightAnchor.constraint(equalToConstant: previewSize.height),
-            trimSlider.widthAnchor.constraint(equalTo: imageView.widthAnchor),
-            // Room for the widest size label, so the window does not jump as estimates arrive.
-            sizeLabel.widthAnchor.constraint(greaterThanOrEqualToConstant: 100)
-        ])
+            trimSlider.widthAnchor.constraint(equalTo: stack.widthAnchor)
+        ] + buttonRows.map { $0.widthAnchor.constraint(equalTo: stack.widthAnchor) })
+
+        if buttonRows.count > 1 {
+            // Matching widths line the two pairs up in columns.
+            NSLayoutConstraint.activate(zip(copies, saves).map { $0.widthAnchor.constraint(equalTo: $1.widthAnchor) })
+        }
+    }
+
+    private static let discardGap: CGFloat = 32
+    private static let pairGap: CGFloat = 20
+
+    /// Buttons side by side, 8 points apart.
+    private static func width(of buttons: [NSButton]) -> CGFloat {
+        buttons.map(\.fittingSize.width).reduce(0, +) + CGFloat(buttons.count - 1) * 8
+    }
+
+    /// Discard pinned to the leading edge, the rest to the trailing edge.
+    private static func buttonRow(leading: NSButton?, trailing: [NSButton]) -> NSStackView {
+        let row = NSStackView()
+        row.spacing = 8
+        trailing.forEach { row.addView($0, in: .trailing) }
+        if let leading {
+            row.addView(leading, in: .leading)
+            trailing[0].leadingAnchor.constraint(greaterThanOrEqualTo: leading.trailingAnchor, constant: discardGap).isActive = true
+        }
+        return row
     }
 
     private static func previewSize(width: Int, height: Int) -> NSSize {
-        // Never narrower than the controls beneath it, and never larger than the recording.
+        // Never larger than the recording.
         let factor = min(1, maximumPreviewSize.width / CGFloat(width), maximumPreviewSize.height / CGFloat(height))
-        return NSSize(width: max(CGFloat(width) * factor, 360), height: CGFloat(height) * factor)
+        return NSSize(width: CGFloat(width) * factor, height: CGFloat(height) * factor)
     }
 
     private func show(frame index: Int) {
