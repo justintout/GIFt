@@ -24,12 +24,14 @@ final class RecordingEditorController: NSWindowController {
     private static let scales: [Double] = [1, 0.75, 0.5, 0.25]
     private static let maximumPreviewSize = NSSize(width: 720, height: 450)
     /// In display order. The last is the default button.
-    private static let choices: [(title: String, action: ReviewDecision.Action, format: ExportFormat)] = [
-        ("Copy as MP4", .copy, .mp4),
-        ("Copy as GIF", .copy, .gif),
-        ("Save as MP4", .save, .mp4),
-        ("Save as GIF", .save, .gif)
+    private static let choices: [(title: String, symbol: String, action: ReviewDecision.Action, format: ExportFormat)] = [
+        ("Copy as MP4", "doc.on.doc", .copy, .mp4),
+        ("Copy as GIF", "doc.on.doc", .copy, .gif),
+        ("Save as MP4", "square.and.arrow.down", .save, .mp4),
+        ("Save as GIF", "square.and.arrow.down", .save, .gif)
     ]
+    /// Margin around the controls, which the stage matches so the preview lines up with them.
+    private static let inset: CGFloat = 16
 
     private let recording: Recording
     private let onFinish: (RecordingEditorController, ReviewDecision?) -> Void
@@ -49,9 +51,12 @@ final class RecordingEditorController: NSWindowController {
         self.onFinish = onFinish
         trimSlider = TrimSlider(count: recording.frames.count)
         // No close button: closing would have to mean either save or discard, and guessing wrong
-        // loses a recording.
-        let window = NSWindow(contentRect: .zero, styleMask: [.titled], backing: .buffered, defer: false)
+        // loses a recording. The title bar is transparent so the stage runs to the top edge; the
+        // title stays for Mission Control and VoiceOver but is not drawn over the dark stage.
+        let window = NSWindow(contentRect: .zero, styleMask: [.titled, .fullSizeContentView], backing: .buffered, defer: false)
         window.title = "Review Recording"
+        window.titlebarAppearsTransparent = true
+        window.titleVisibility = .hidden
         window.isReleasedWhenClosed = false
         super.init(window: window)
         setupUI()
@@ -76,11 +81,18 @@ final class RecordingEditorController: NSWindowController {
     }
 
     private func setupUI() {
-        guard let contentView = window?.contentView else { return }
+        guard let window, let contentView = window.contentView,
+              let belowTitleBar = window.contentLayoutGuide as? NSLayoutGuide else { return }
         let first = recording.frames[0].image
 
         imageView.imageScaling = .scaleProportionallyUpOrDown
         imageView.translatesAutoresizingMaskIntoConstraints = false
+        imageView.wantsLayer = true
+        let shadow = NSShadow()
+        shadow.shadowColor = NSColor.black.withAlphaComponent(0.5)
+        shadow.shadowOffset = NSSize(width: 0, height: -4)
+        shadow.shadowBlurRadius = 12
+        imageView.shadow = shadow
         let previewSize = Self.previewSize(width: first.width, height: first.height)
 
         trimSlider.onTrim = { [weak self] index in
@@ -94,7 +106,9 @@ final class RecordingEditorController: NSWindowController {
             self?.show(frame: index)
         }
 
-        playButton.isBordered = false
+        playButton.bezelStyle = .circular
+        playButton.controlSize = .small
+        playButton.imagePosition = .imageOnly
         playButton.target = self
         playButton.action = #selector(togglePlayback)
         // A key equivalent rather than a key handler, so Space works whatever has focus.
@@ -117,10 +131,10 @@ final class RecordingEditorController: NSWindowController {
         }
         sizeLabel.lineBreakMode = .byTruncatingTail
 
-        let discardButton = NSButton(title: "Discard", target: self, action: #selector(discard))
+        let discardButton = Self.button("Discard", symbol: "trash", target: self, action: #selector(discard))
         discardButton.keyEquivalent = "\u{1b}"
         let choiceButtons = Self.choices.enumerated().map { index, choice in
-            let button = NSButton(title: choice.title, target: self, action: #selector(choose(_:)))
+            let button = Self.button(choice.title, symbol: choice.symbol, target: self, action: #selector(choose(_:)))
             button.tag = index
             return button
         }
@@ -154,7 +168,21 @@ final class RecordingEditorController: NSWindowController {
             sizeRow.addArrangedSubview(sizeLabel)
         }
 
-        let stack = NSStackView(views: [imageView, trimSlider, rangeRow, sizeRow] + (estimatesFitBeside ? [] : [sizeLabel]) + buttonRows)
+        // The recording sits on a dark stage under the transparent title bar, with the controls in
+        // a bar beneath it.
+        let stage = StageView()
+        stage.wantsLayer = true
+        stage.translatesAutoresizingMaskIntoConstraints = false
+        stage.addSubview(imageView)
+
+        let bar = NSVisualEffectView()
+        bar.material = .windowBackground
+        bar.translatesAutoresizingMaskIntoConstraints = false
+        let separator = NSBox()
+        separator.boxType = .separator
+        separator.translatesAutoresizingMaskIntoConstraints = false
+
+        let stack = NSStackView(views: [trimSlider, rangeRow, sizeRow] + (estimatesFitBeside ? [] : [sizeLabel]) + buttonRows)
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = 12
@@ -163,21 +191,39 @@ final class RecordingEditorController: NSWindowController {
         stack.setCustomSpacing(20, after: estimatesFitBeside ? sizeRow : sizeLabel)
         stack.setCustomSpacing(8, after: buttonRows[0])
         stack.translatesAutoresizingMaskIntoConstraints = false
-        contentView.addSubview(stack)
+        bar.addSubview(stack)
+        bar.addSubview(separator)
+        contentView.addSubview(stage)
+        contentView.addSubview(bar)
 
+        let inset = Self.inset
         NSLayoutConstraint.activate([
-            stack.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 16),
-            stack.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -16),
-            stack.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 16),
-            stack.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -16),
-            stack.widthAnchor.constraint(equalToConstant: width),
-            imageView.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            stage.topAnchor.constraint(equalTo: contentView.topAnchor),
+            stage.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
+            stage.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
+            imageView.topAnchor.constraint(equalTo: belowTitleBar.topAnchor, constant: 4),
+            imageView.bottomAnchor.constraint(equalTo: stage.bottomAnchor, constant: -inset),
+            imageView.centerXAnchor.constraint(equalTo: stage.centerXAnchor),
+            imageView.widthAnchor.constraint(equalToConstant: previewSize.width),
             imageView.heightAnchor.constraint(equalToConstant: previewSize.height),
+
+            bar.topAnchor.constraint(equalTo: stage.bottomAnchor),
+            bar.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
+            bar.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
+            bar.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
+            separator.topAnchor.constraint(equalTo: bar.topAnchor),
+            separator.leadingAnchor.constraint(equalTo: bar.leadingAnchor),
+            separator.trailingAnchor.constraint(equalTo: bar.trailingAnchor),
+            stack.topAnchor.constraint(equalTo: bar.topAnchor, constant: 12),
+            stack.leadingAnchor.constraint(equalTo: bar.leadingAnchor, constant: inset),
+            stack.trailingAnchor.constraint(equalTo: bar.trailingAnchor, constant: -inset),
+            stack.bottomAnchor.constraint(equalTo: bar.bottomAnchor, constant: -inset),
+            stack.widthAnchor.constraint(equalToConstant: width),
             trimSlider.widthAnchor.constraint(equalTo: stack.widthAnchor)
         ] + buttonRows.map { $0.widthAnchor.constraint(equalTo: stack.widthAnchor) })
 
         // Arrow keys step the playhead from the moment the window opens.
-        window?.initialFirstResponder = trimSlider
+        window.initialFirstResponder = trimSlider
 
         if buttonRows.count > 1 {
             // Matching widths line the two pairs up in columns.
@@ -187,6 +233,13 @@ final class RecordingEditorController: NSWindowController {
 
     private static let discardGap: CGFloat = 32
     private static let pairGap: CGFloat = 20
+
+    private static func button(_ title: String, symbol: String, target: AnyObject, action: Selector) -> NSButton {
+        let button = NSButton(title: title, target: target, action: action)
+        button.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)
+        button.imagePosition = .imageLeading
+        return button
+    }
 
     /// Buttons side by side, 8 points apart.
     private static func width(of buttons: [NSButton]) -> CGFloat {
@@ -342,7 +395,7 @@ final class RecordingEditorController: NSWindowController {
 final class TrimSlider: NSView {
     private enum Drag { case lower, upper, playhead }
 
-    private static let handleWidth: CGFloat = 8
+    private static let handleWidth: CGFloat = 9
     /// How far beyond a handle's edge a click still grabs it.
     private static let handleSlop: CGFloat = 4
 
@@ -381,22 +434,41 @@ final class TrimSlider: NSView {
 
     override func draw(_ dirtyRect: NSRect) {
         let track = trackRect
-        let groove = NSRect(x: track.minX, y: bounds.midY - 2, width: track.width, height: 4)
+        let groove = NSRect(x: track.minX, y: bounds.midY - 3, width: track.width, height: 6)
         NSColor.quaternaryLabelColor.setFill()
-        NSBezierPath(roundedRect: groove, xRadius: 2, yRadius: 2).fill()
+        NSBezierPath(roundedRect: groove, xRadius: 3, yRadius: 3).fill()
 
         let lowerX = x(for: range.lowerBound)
         let upperX = x(for: range.upperBound)
-        NSColor.controlAccentColor.setFill()
-        NSRect(x: lowerX, y: groove.minY, width: upperX - lowerX, height: groove.height).fill()
+        NSColor.controlAccentColor.withAlphaComponent(0.7).setFill()
+        NSBezierPath(roundedRect: NSRect(x: lowerX, y: groove.minY, width: upperX - lowerX, height: groove.height), xRadius: 3, yRadius: 3).fill()
 
+        // A line with a knob on top, so the playhead reads as a different thing from the handles.
+        let playheadX = x(for: playhead)
         NSColor.labelColor.setFill()
-        NSRect(x: x(for: playhead) - 1, y: bounds.minY, width: 2, height: bounds.height).fill()
+        NSRect(x: playheadX - 1, y: bounds.minY + 1, width: 2, height: bounds.height - 4).fill()
+        NSBezierPath(ovalIn: NSRect(x: playheadX - 3.5, y: bounds.maxY - 7, width: 7, height: 7)).fill()
 
         for handleX in [lowerX, upperX] {
-            let handle = NSRect(x: handleX - Self.handleWidth / 2, y: bounds.minY + 2, width: Self.handleWidth, height: bounds.height - 4)
-            NSBezierPath(roundedRect: handle, xRadius: 2, yRadius: 2).fill()
+            let handle = NSBezierPath(roundedRect: NSRect(x: handleX - Self.handleWidth / 2, y: bounds.midY - 9, width: Self.handleWidth, height: 18), xRadius: 4, yRadius: 4)
+            NSGraphicsContext.saveGraphicsState()
+            let shadow = NSShadow()
+            shadow.shadowColor = NSColor.black.withAlphaComponent(0.25)
+            shadow.shadowOffset = NSSize(width: 0, height: -1)
+            shadow.shadowBlurRadius = 2
+            shadow.set()
+            Self.knobColor.setFill()
+            handle.fill()
+            NSGraphicsContext.restoreGraphicsState()
+            NSColor.separatorColor.setStroke()
+            handle.lineWidth = 0.5
+            handle.stroke()
         }
+    }
+
+    /// Light in both appearances, like the knobs on system sliders.
+    private static let knobColor = NSColor(name: nil) { appearance in
+        appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua ? NSColor(white: 0.8, alpha: 1) : .white
     }
 
     override func mouseDown(with event: NSEvent) {
@@ -475,5 +547,16 @@ final class TrimSlider: NSView {
         guard count > 1, trackRect.width > 0 else { return 0 }
         let fraction = (pointX - trackRect.minX) / trackRect.width
         return min(max(Int((fraction * CGFloat(count - 1)).rounded()), 0), count - 1)
+    }
+}
+
+/// The dark backdrop behind the preview. Dark in both appearances, like Photos and QuickTime,
+/// with light mode a shade lighter so it does not read as a hole in the window.
+private final class StageView: NSView {
+    override var wantsUpdateLayer: Bool { true }
+
+    override func updateLayer() {
+        let dark = effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+        layer?.backgroundColor = NSColor(white: dark ? 0.067 : 0.165, alpha: 1).cgColor
     }
 }
