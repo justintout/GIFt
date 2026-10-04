@@ -9,11 +9,11 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     private var permissionRows: [PermissionRow] = []
     private let stack = NSStackView()
     private let pathField = NSTextField()
-    private let autoStartCheckbox = NSButton(checkboxWithTitle: "Start recording immediately after selecting an area or window", target: nil, action: nil)
-    private let bringWindowToFrontCheckbox = NSButton(checkboxWithTitle: "Bring the selected window to the front before recording", target: nil, action: nil)
-    private let reviewCheckbox = NSButton(checkboxWithTitle: "Review each recording before saving it", target: nil, action: nil)
-    private let highlightClicksCheckbox = NSButton(checkboxWithTitle: "Highlight mouse clicks", target: nil, action: nil)
-    private let launchAtLoginCheckbox = NSButton(checkboxWithTitle: "Open GIFt at login", target: nil, action: nil)
+    private let autoStartSwitch = NSSwitch()
+    private let bringWindowToFrontSwitch = NSSwitch()
+    private let reviewSwitch = NSSwitch()
+    private let highlightClicksSwitch = NSSwitch()
+    private let launchAtLoginSwitch = NSSwitch()
     private let fpsPopup = NSPopUpButton()
     private let formatPopup = NSPopUpButton()
     private let shortcutRecorder = ShortcutRecorderView()
@@ -34,10 +34,14 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         self.settings = settings
         self.onSave = onSave
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 560, height: 500),
-                              styleMask: [.titled, .closable],
+                              styleMask: [.titled, .closable, .fullSizeContentView],
                               backing: .buffered,
                               defer: false)
         window.title = "GIFt Settings"
+        // Matches the review window: the content runs under a transparent title bar, and the
+        // heading in the content takes the title's place.
+        window.titlebarAppearsTransparent = true
+        window.titleVisibility = .hidden
         window.isReleasedWhenClosed = false
         super.init(window: window)
         window.delegate = self
@@ -55,7 +59,9 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     @MainActor
     private final class PermissionRow {
         let permission: Permission
+        let statusIcon = NSImageView()
         let statusLabel = NSTextField(labelWithString: "")
+        let actions = NSStackView()
         let detailLabel = NSTextField(wrappingLabelWithString: "")
         let grantButton = NSButton(title: "Grant…", target: nil, action: nil)
         let settingsButton = NSButton(title: "System Settings", target: nil, action: nil)
@@ -96,12 +102,12 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     }
 
     private func setupUI() {
-        guard let contentView = window?.contentView else { return }
-        contentView.wantsLayer = true
+        guard let window, let contentView = window.contentView,
+              let belowTitleBar = window.contentLayoutGuide as? NSLayoutGuide else { return }
 
         stack.orientation = .vertical
         stack.alignment = .leading
-        stack.spacing = 12
+        stack.spacing = 8
         stack.translatesAutoresizingMaskIntoConstraints = false
         contentView.addSubview(stack)
 
@@ -109,10 +115,9 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         stack.addArrangedSubview(titleLabel)
 
         introLabel.maximumNumberOfLines = 0
+        introLabel.textColor = .secondaryLabelColor
         introLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         stack.addArrangedSubview(introLabel)
-
-        addSectionHeader("Permissions")
 
         // Every permission the app can use is listed with what it buys, so nobody has to guess why
         // GIFt wants to watch keystrokes or reach into another application's windows.
@@ -125,198 +130,205 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
             row.settingsButton.action = #selector(openPermissionSettings(_:))
             row.settingsButton.tag = index
             permissionRows.append(row)
-            stack.addArrangedSubview(makePermissionRow(row))
         }
-
-        addSectionHeader("Recording")
-
-        let pathRow = NSStackView()
-        pathRow.orientation = .horizontal
-        pathRow.alignment = .firstBaseline
-        pathRow.spacing = 8
-
-        pathRow.addArrangedSubview(NSTextField(labelWithString: "Output folder:"))
+        addSection("Permissions", rows: permissionRows.map(makePermissionRow))
 
         pathField.placeholderString = "Choose a folder…"
         pathField.isEditable = false
         pathField.isBezeled = true
         pathField.bezelStyle = .roundedBezel
         pathField.lineBreakMode = .byTruncatingHead
-        pathField.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        pathRow.addArrangedSubview(pathField)
-
         let browseButton = NSButton(title: "Choose…", target: self, action: #selector(browse))
-        pathRow.addArrangedSubview(browseButton)
-        stack.addArrangedSubview(pathRow)
 
-        stack.addArrangedSubview(autoStartCheckbox)
-        stack.addArrangedSubview(bringWindowToFrontCheckbox)
-        stack.addArrangedSubview(reviewCheckbox)
-        stack.addArrangedSubview(highlightClicksCheckbox)
-        stack.addArrangedSubview(launchAtLoginCheckbox)
-
-        let fpsRow = NSStackView()
-        fpsRow.orientation = .horizontal
-        fpsRow.alignment = .centerY
-        fpsRow.spacing = 8
-        fpsRow.addArrangedSubview(NSTextField(labelWithString: "Default frame rate:"))
-        fpsPopup.addItems(withTitles: Settings.allowedFrameRates.map(String.init))
+        fpsPopup.addItems(withTitles: Settings.allowedFrameRates.map { "\($0) fps" })
         fpsPopup.autoenablesItems = false
-        fpsRow.addArrangedSubview(fpsPopup)
-        fpsRow.addArrangedSubview(NSTextField(labelWithString: "Save as:"))
         formatPopup.addItems(withTitles: ExportFormat.allCases.map(\.displayName))
-        fpsRow.addArrangedSubview(formatPopup)
-        fpsRow.setCustomSpacing(16, after: fpsPopup)
-        stack.addArrangedSubview(fpsRow)
-
-        let shortcutRow = NSStackView()
-        shortcutRow.orientation = .horizontal
-        shortcutRow.alignment = .centerY
-        shortcutRow.spacing = 8
-        shortcutRow.addArrangedSubview(NSTextField(labelWithString: "Stop and save:"))
 
         shortcutRecorder.onCapture = { [weak self] shortcut in
             self?.settings.stopShortcut = shortcut
         }
-        shortcutRow.addArrangedSubview(shortcutRecorder)
-
         let resetShortcutButton = NSButton(title: "Default", target: self, action: #selector(resetShortcut))
-        shortcutRow.addArrangedSubview(resetShortcutButton)
-        stack.addArrangedSubview(shortcutRow)
+        let shortcutControls = row("Stop and save", shortcutRecorder, resetShortcutButton)
+        let shortcutRow = NSStackView(views: [
+            shortcutControls,
+            detail("Works from any app and needs no permission. Escape still cancels a recording and discards it.")
+        ])
+        shortcutRow.orientation = .vertical
+        shortcutRow.alignment = .leading
+        shortcutRow.spacing = 2
+        shortcutControls.widthAnchor.constraint(equalTo: shortcutRow.widthAnchor).isActive = true
+        for control in [autoStartSwitch, bringWindowToFrontSwitch, reviewSwitch, highlightClicksSwitch, launchAtLoginSwitch] {
+            control.controlSize = .small
+        }
 
-        let shortcutNote = NSTextField(wrappingLabelWithString: "Works from any app and needs no permission. Escape still cancels a recording and discards it.")
-        shortcutNote.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
-        shortcutNote.textColor = .secondaryLabelColor
-        shortcutNote.maximumNumberOfLines = 0
-        shortcutNote.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        stack.addArrangedSubview(shortcutNote)
+        addSection("Recording", rows: [
+            row("Output folder", pathField, browseButton),
+            row("Start recording immediately after selecting an area or window", autoStartSwitch),
+            row("Bring the selected window to the front before recording", bringWindowToFrontSwitch),
+            row("Review each recording before saving it", reviewSwitch),
+            row("Highlight mouse clicks", highlightClicksSwitch),
+            row("Open GIFt at login", launchAtLoginSwitch),
+            row("Default frame rate", fpsPopup),
+            row("Save as", formatPopup),
+            shortcutRow
+        ])
 
-        addSectionHeader("Selection overlay")
+        addSection("Selection overlay", rows: [
+            row("Color", indicatorColorWell),
+            sliderRow(label: "Fill opacity", slider: opacitySlider, valueLabel: opacityValueLabel, range: IndicatorStyle.fillOpacityRange),
+            sliderRow(label: "Border width", slider: borderWidthSlider, valueLabel: borderWidthValueLabel, range: IndicatorStyle.borderWidthRange)
+        ])
 
-        let colorRow = NSStackView()
-        colorRow.orientation = .horizontal
-        colorRow.alignment = .centerY
-        colorRow.spacing = 8
-        colorRow.addArrangedSubview(NSTextField(labelWithString: "Color:"))
-        colorRow.addArrangedSubview(indicatorColorWell)
-        stack.addArrangedSubview(colorRow)
-
-        stack.addArrangedSubview(sliderRow(
-            label: "Fill opacity:",
-            slider: opacitySlider,
-            valueLabel: opacityValueLabel,
-            range: IndicatorStyle.fillOpacityRange,
-            action: #selector(updateIndicatorLabels)
-        ))
-
-        stack.addArrangedSubview(sliderRow(
-            label: "Border width:",
-            slider: borderWidthSlider,
-            valueLabel: borderWidthValueLabel,
-            range: IndicatorStyle.borderWidthRange,
-            action: #selector(updateIndicatorLabels)
-        ))
-
-        let buttonRow = NSStackView()
-        buttonRow.orientation = .horizontal
-        buttonRow.alignment = .centerY
-        buttonRow.spacing = 8
-
+        // The footer matches the review window's control bar: a material with a separator above.
+        let footer = NSVisualEffectView()
+        footer.material = .windowBackground
+        footer.translatesAutoresizingMaskIntoConstraints = false
+        let separator = NSBox()
+        separator.boxType = .separator
+        separator.translatesAutoresizingMaskIntoConstraints = false
         cancelButton.target = self
         cancelButton.action = #selector(cancel)
         saveButton.target = self
         saveButton.action = #selector(save)
         saveButton.keyEquivalent = "\r"
-
-        buttonRow.addView(cancelButton, in: .trailing)
-        buttonRow.addView(saveButton, in: .trailing)
-        stack.setCustomSpacing(20, after: stack.arrangedSubviews.last!)
-        stack.addArrangedSubview(buttonRow)
+        let buttonRow = NSStackView(views: [cancelButton, saveButton])
+        buttonRow.spacing = 8
+        buttonRow.translatesAutoresizingMaskIntoConstraints = false
+        footer.addSubview(separator)
+        footer.addSubview(buttonRow)
+        contentView.addSubview(footer)
 
         NSLayoutConstraint.activate([
-            stack.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 16),
-            stack.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -16),
-            stack.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 16),
-            // Pinned on all sides, so the window takes its height from the content and shrinks
-            // when granted permissions hide their buttons.
-            stack.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -16),
+            stack.topAnchor.constraint(equalTo: belowTitleBar.topAnchor, constant: 4),
+            stack.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: Self.inset),
+            stack.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -Self.inset),
             stack.widthAnchor.constraint(equalToConstant: 528),
-            buttonRow.widthAnchor.constraint(equalTo: stack.widthAnchor),
-            borderWidthSlider.leadingAnchor.constraint(equalTo: opacitySlider.leadingAnchor),
             introLabel.widthAnchor.constraint(equalTo: stack.widthAnchor),
-            shortcutNote.widthAnchor.constraint(equalTo: stack.widthAnchor),
-            pathField.widthAnchor.constraint(greaterThanOrEqualToConstant: 300),
-            opacitySlider.widthAnchor.constraint(greaterThanOrEqualToConstant: 240),
-            borderWidthSlider.widthAnchor.constraint(greaterThanOrEqualToConstant: 240),
-            opacityValueLabel.widthAnchor.constraint(equalToConstant: 48),
-            borderWidthValueLabel.widthAnchor.constraint(equalToConstant: 48)
-        ])
 
-        // The explanations wrap, so each needs the full width rather than its intrinsic one.
-        NSLayoutConstraint.activate(permissionRows.map { $0.detailLabel.widthAnchor.constraint(equalTo: stack.widthAnchor) })
+            // Pinned top to bottom, so the window takes its height from the content and shrinks
+            // when granted permissions hide their buttons.
+            footer.topAnchor.constraint(equalTo: stack.bottomAnchor, constant: 20),
+            footer.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
+            footer.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
+            footer.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
+            separator.topAnchor.constraint(equalTo: footer.topAnchor),
+            separator.leadingAnchor.constraint(equalTo: footer.leadingAnchor),
+            separator.trailingAnchor.constraint(equalTo: footer.trailingAnchor),
+            buttonRow.topAnchor.constraint(equalTo: footer.topAnchor, constant: 12),
+            buttonRow.bottomAnchor.constraint(equalTo: footer.bottomAnchor, constant: -12),
+            buttonRow.trailingAnchor.constraint(equalTo: footer.trailingAnchor, constant: -Self.inset),
+
+            pathField.widthAnchor.constraint(equalToConstant: 260),
+            opacitySlider.widthAnchor.constraint(equalToConstant: 200),
+            borderWidthSlider.widthAnchor.constraint(equalToConstant: 200),
+            opacityValueLabel.widthAnchor.constraint(equalToConstant: 40),
+            borderWidthValueLabel.widthAnchor.constraint(equalToConstant: 40)
+        ])
 
         updateMode()
     }
 
-    private func addSectionHeader(_ title: String) {
+    private static let inset: CGFloat = 16
+    /// Padding inside a section's rounded group.
+    private static let groupInset: CGFloat = 12
+
+    /// A bold heading over a rounded group of rows split by separators, as in System Settings.
+    private func addSection(_ title: String, rows: [NSView]) {
         if let previous = stack.arrangedSubviews.last {
-            stack.setCustomSpacing(24, after: previous)
+            stack.setCustomSpacing(20, after: previous)
         }
-        let label = NSTextField(labelWithString: title)
-        label.font = .boldSystemFont(ofSize: NSFont.systemFontSize)
-        stack.addArrangedSubview(label)
-        stack.setCustomSpacing(8, after: label)
+        let heading = NSTextField(labelWithString: title)
+        heading.font = .boldSystemFont(ofSize: NSFont.systemFontSize)
+        stack.addArrangedSubview(heading)
+
+        let column = NSStackView()
+        column.orientation = .vertical
+        column.spacing = 5
+        column.edgeInsets = NSEdgeInsets(top: 6, left: Self.groupInset, bottom: 6, right: Self.groupInset)
+        for (index, row) in rows.enumerated() {
+            if index > 0 {
+                let separator = NSBox()
+                separator.boxType = .separator
+                column.addArrangedSubview(separator)
+                separator.widthAnchor.constraint(equalTo: column.widthAnchor, constant: -2 * Self.groupInset).isActive = true
+            }
+            column.addArrangedSubview(row)
+            row.widthAnchor.constraint(equalTo: column.widthAnchor, constant: -2 * Self.groupInset).isActive = true
+        }
+
+        let group = NSBox()
+        group.boxType = .custom
+        group.titlePosition = .noTitle
+        group.cornerRadius = 8
+        group.borderColor = .separatorColor
+        // The second stripe color is a shade lighter than the window in both appearances, which
+        // is the lift System Settings gives its groups.
+        group.fillColor = NSColor.alternatingContentBackgroundColors[1]
+        group.contentViewMargins = .zero
+        group.contentView = column
+        stack.addArrangedSubview(group)
+        group.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
     }
 
-    /// One permission: its name, whether it is granted, what it buys, and how to get it.
-    private func makePermissionRow(_ row: PermissionRow) -> NSStackView {
-        let container = NSStackView()
-        container.orientation = .vertical
-        container.alignment = .leading
-        container.spacing = 2
+    /// A label on the leading edge and its controls on the trailing edge.
+    private func row(_ title: String, _ controls: NSView...) -> NSStackView {
+        let row = NSStackView()
+        row.spacing = 8
+        row.addView(NSTextField(labelWithString: title), in: .leading)
+        controls.forEach { row.addView($0, in: .trailing) }
+        // Rows with a switch, a popup, or plain text all get the same height.
+        row.heightAnchor.constraint(greaterThanOrEqualToConstant: 24).isActive = true
+        return row
+    }
 
-        let header = NSStackView()
-        header.orientation = .horizontal
-        header.alignment = .firstBaseline
-        header.spacing = 6
+    private func detail(_ text: String) -> NSTextField {
+        let label = NSTextField(wrappingLabelWithString: text)
+        label.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+        label.textColor = .secondaryLabelColor
+        return label
+    }
 
+    /// One permission: whether it is granted, its name, what it buys, and how to get it.
+    private func makePermissionRow(_ row: PermissionRow) -> NSView {
         let name = NSTextField(labelWithString: row.permission.title)
-        name.font = .boldSystemFont(ofSize: NSFont.smallSystemFontSize)
-        header.addArrangedSubview(name)
-
         row.statusLabel.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
-        header.addArrangedSubview(row.statusLabel)
-        container.addArrangedSubview(header)
+        row.statusLabel.textColor = .secondaryLabelColor
+        let header = NSStackView()
+        header.addView(name, in: .leading)
+        header.addView(row.statusLabel, in: .trailing)
 
-        container.addArrangedSubview(row.detailLabel)
+        row.actions.spacing = 8
+        row.actions.addArrangedSubview(row.grantButton)
+        row.actions.addArrangedSubview(row.settingsButton)
 
-        let buttons = NSStackView()
-        buttons.orientation = .horizontal
-        buttons.spacing = 8
-        buttons.addArrangedSubview(row.grantButton)
-        buttons.addArrangedSubview(row.settingsButton)
-        container.addArrangedSubview(buttons)
+        let text = NSStackView(views: [header, row.detailLabel, row.actions])
+        text.orientation = .vertical
+        text.alignment = .leading
+        text.spacing = 2
+        text.setCustomSpacing(6, after: row.detailLabel)
 
+        let container = NSStackView(views: [row.statusIcon, text])
+        container.alignment = .top
+        container.spacing = 8
+        NSLayoutConstraint.activate([
+            row.statusIcon.widthAnchor.constraint(equalToConstant: 16),
+            text.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            header.widthAnchor.constraint(equalTo: text.widthAnchor),
+            row.detailLabel.widthAnchor.constraint(equalTo: text.widthAnchor)
+        ])
         return container
     }
 
-    private func sliderRow(label: String, slider: NSSlider, valueLabel: NSTextField, range: ClosedRange<CGFloat>, action: Selector) -> NSStackView {
-        let row = NSStackView()
-        row.orientation = .horizontal
-        row.alignment = .centerY
-        row.spacing = 8
-        row.addArrangedSubview(NSTextField(labelWithString: label))
+    private func sliderRow(label: String, slider: NSSlider, valueLabel: NSTextField, range: ClosedRange<CGFloat>) -> NSStackView {
         slider.minValue = Double(range.lowerBound)
         slider.maxValue = Double(range.upperBound)
         slider.target = self
-        slider.action = action
+        slider.action = #selector(updateIndicatorLabels)
         slider.numberOfTickMarks = 0
-        slider.setContentHuggingPriority(.defaultLow, for: .horizontal)
-        row.addArrangedSubview(slider)
         valueLabel.alignment = .right
         valueLabel.font = .monospacedDigitSystemFont(ofSize: NSFont.systemFontSize, weight: .regular)
-        row.addArrangedSubview(valueLabel)
-        return row
+        valueLabel.textColor = .secondaryLabelColor
+        return row(label, slider, valueLabel)
     }
 
     private func updateMode() {
@@ -331,14 +343,14 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
 
     private func apply(settings: Settings) {
         pathField.stringValue = settings.outputDirectory.path
-        autoStartCheckbox.state = settings.autoStartAfterSelection ? .on : .off
-        bringWindowToFrontCheckbox.state = settings.bringWindowToFront ? .on : .off
-        reviewCheckbox.state = settings.reviewBeforeSaving ? .on : .off
-        highlightClicksCheckbox.state = settings.highlightClicks ? .on : .off
+        autoStartSwitch.state = settings.autoStartAfterSelection ? .on : .off
+        bringWindowToFrontSwitch.state = settings.bringWindowToFront ? .on : .off
+        reviewSwitch.state = settings.reviewBeforeSaving ? .on : .off
+        highlightClicksSwitch.state = settings.highlightClicks ? .on : .off
         // Read from the system rather than stored, because the user can also change it in
         // System Settings > General > Login Items.
-        launchAtLoginCheckbox.state = SMAppService.mainApp.status == .enabled ? .on : .off
-        if let index = fpsPopup.itemTitles.firstIndex(of: "\(settings.defaultFPS)") {
+        launchAtLoginSwitch.state = SMAppService.mainApp.status == .enabled ? .on : .off
+        if let index = Settings.allowedFrameRates.firstIndex(of: settings.defaultFPS) {
             fpsPopup.selectItem(at: index)
         }
         shortcutRecorder.shortcut = settings.stopShortcut
@@ -352,10 +364,12 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     private func updatePermissionRows() {
         for row in permissionRows {
             let granted = row.permission.isGranted
-            row.statusLabel.stringValue = granted ? "granted" : "not granted"
-            row.statusLabel.textColor = granted ? .systemGreen : .secondaryLabelColor
-            row.grantButton.isHidden = granted
-            row.settingsButton.isHidden = granted
+            row.statusLabel.stringValue = granted ? "Granted" : "Not granted"
+            row.actions.isHidden = granted
+            let required = row.permission == .screenRecording
+            let symbol = granted ? "checkmark.circle.fill" : required ? "exclamationmark.triangle.fill" : "circle.dashed"
+            row.statusIcon.image = NSImage(systemSymbolName: symbol, accessibilityDescription: row.statusLabel.stringValue)
+            row.statusIcon.contentTintColor = granted ? .systemGreen : required ? .systemYellow : .tertiaryLabelColor
         }
     }
 
@@ -432,7 +446,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     }
 
     private func applyLaunchAtLogin() {
-        let wanted = launchAtLoginCheckbox.state == .on
+        let wanted = launchAtLoginSwitch.state == .on
         let service = SMAppService.mainApp
         guard wanted != (service.status == .enabled) else { return }
 
@@ -455,14 +469,12 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     }
 
     private func updateSettingsFromControls() {
-        settings.autoStartAfterSelection = (autoStartCheckbox.state == .on)
+        settings.autoStartAfterSelection = (autoStartSwitch.state == .on)
         settings.stopShortcut = shortcutRecorder.shortcut
-        settings.bringWindowToFront = (bringWindowToFrontCheckbox.state == .on)
-        settings.reviewBeforeSaving = (reviewCheckbox.state == .on)
-        settings.highlightClicks = (highlightClicksCheckbox.state == .on)
-        if let title = fpsPopup.selectedItem?.title, let fps = Int(title) {
-            settings.defaultFPS = fps
-        }
+        settings.bringWindowToFront = (bringWindowToFrontSwitch.state == .on)
+        settings.reviewBeforeSaving = (reviewSwitch.state == .on)
+        settings.highlightClicks = (highlightClicksSwitch.state == .on)
+        settings.defaultFPS = Settings.allowedFrameRates[fpsPopup.indexOfSelectedItem]
         settings.exportFormat = ExportFormat.allCases[formatPopup.indexOfSelectedItem]
         settings.indicatorStyle = IndicatorStyle(
             color: indicatorColorWell.color,
