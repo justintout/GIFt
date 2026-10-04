@@ -103,7 +103,6 @@ final class GiftApp: NSObject, NSApplicationDelegate {
         settingsItem.keyEquivalentModifierMask = [.command]
         menu.addItem(settingsItem)
 
-        menu.addItem(NSMenuItem(title: "Screen Recording Setup…", action: #selector(openPermissionSetup), keyEquivalent: ""))
         menu.addItem(NSMenuItem(title: "Open Output Folder", action: #selector(openOutputFolder), keyEquivalent: ""))
         menu.addItem(.separator())
         menu.addItem(NSMenuItem(title: "Quit GIFt", action: #selector(quit), keyEquivalent: ""))
@@ -402,10 +401,6 @@ final class GiftApp: NSObject, NSApplicationDelegate {
 
     @objc private func openSettings() {
         showSettings(initialSetup: !settings.hasCompletedInitialSetup)
-    }
-
-    @objc private func openPermissionSetup() {
-        showSettings(initialSetup: false)
     }
 
     private func showSettings(initialSetup: Bool, onPermissionGranted: (() -> Void)? = nil) {
