@@ -2,25 +2,46 @@ import AppKit
 import CoreMedia
 import GiftCore
 
-/// Shown after a recording stops, before anything is written: trim either end and pick an output
-/// size and format. The frames are still in memory, so trimming never re-encodes anything.
+/// What the user chose in the review window.
+struct ReviewDecision {
+    enum Action {
+        /// Write to the output folder, then copy.
+        case save
+        /// Copy only; the file is written to a temporary folder for the clipboard to point at.
+        case copy
+    }
+
+    let action: Action
+    let format: ExportFormat
+    let edit: FrameEdit
+}
+
+/// Shown after a recording stops, before anything is written: trim either end, pick an output
+/// size, then save or copy in either format. The frames are still in memory, so trimming never
+/// re-encodes anything.
 @MainActor
 final class RecordingEditorController: NSWindowController {
     private static let scales: [Double] = [1, 0.75, 0.5, 0.25]
     private static let maximumPreviewSize = NSSize(width: 720, height: 450)
+    /// In display order. The last is the default button.
+    private static let choices: [(title: String, action: ReviewDecision.Action, format: ExportFormat)] = [
+        ("Copy as MP4", .copy, .mp4),
+        ("Copy as GIF", .copy, .gif),
+        ("Save as MP4", .save, .mp4),
+        ("Save as GIF", .save, .gif)
+    ]
 
     private let recording: Recording
-    private let onFinish: (RecordingEditorController, (edit: FrameEdit, format: ExportFormat)?) -> Void
+    private let onFinish: (RecordingEditorController, ReviewDecision?) -> Void
     private let imageView = NSImageView()
     private let trimSlider: TrimSlider
     private let rangeLabel = NSTextField(labelWithString: "")
     private let scalePopup = NSPopUpButton()
-    private let formatPopup = NSPopUpButton()
     private let sizeLabel = NSTextField(labelWithString: "")
     private var estimateTask: Task<Void, Never>?
 
-    /// - Parameter onFinish: Called once, with what to save or `nil` when the user discards.
-    init(recording: Recording, format: ExportFormat, onFinish: @escaping (RecordingEditorController, (edit: FrameEdit, format: ExportFormat)?) -> Void) {
+    /// - Parameter onFinish: Called once, with the user's choice or `nil` when they discard.
+    init(recording: Recording, onFinish: @escaping (RecordingEditorController, ReviewDecision?) -> Void) {
         precondition(!recording.frames.isEmpty, "the recorder never hands over an empty recording")
         self.recording = recording
         self.onFinish = onFinish
@@ -32,7 +53,6 @@ final class RecordingEditorController: NSWindowController {
         window.isReleasedWhenClosed = false
         super.init(window: window)
         setupUI()
-        formatPopup.selectItem(at: ExportFormat.allCases.firstIndex(of: format) ?? 0)
         show(frame: 0)
         updateRangeLabel()
         refreshEstimate()
@@ -51,10 +71,6 @@ final class RecordingEditorController: NSWindowController {
 
     private var edit: FrameEdit {
         FrameEdit(range: trimSlider.range, scale: Self.scales[scalePopup.indexOfSelectedItem])
-    }
-
-    private var format: ExportFormat {
-        ExportFormat.allCases[formatPopup.indexOfSelectedItem]
     }
 
     private func setupUI() {
@@ -78,23 +94,24 @@ final class RecordingEditorController: NSWindowController {
         scalePopup.target = self
         scalePopup.action = #selector(outputChanged)
 
-        formatPopup.addItems(withTitles: ExportFormat.allCases.map(\.displayName))
-        formatPopup.target = self
-        formatPopup.action = #selector(outputChanged)
-
-        let sizeRow = NSStackView(views: [
-            NSTextField(labelWithString: "Format:"), formatPopup,
-            NSTextField(labelWithString: "Size:"), scalePopup, sizeLabel
-        ])
+        let sizeRow = NSStackView(views: [NSTextField(labelWithString: "Size:"), scalePopup, sizeLabel])
         sizeRow.spacing = 8
-        sizeRow.setCustomSpacing(16, after: formatPopup)
 
         let discardButton = NSButton(title: "Discard", target: self, action: #selector(discard))
         discardButton.keyEquivalent = "\u{1b}"
-        let saveButton = NSButton(title: "Save", target: self, action: #selector(save))
-        saveButton.keyEquivalent = "\r"
-        let buttonRow = NSStackView(views: [discardButton, saveButton])
-        buttonRow.spacing = 8
+        let choiceButtons = Self.choices.enumerated().map { index, choice in
+            let button = NSButton(title: choice.title, target: self, action: #selector(choose(_:)))
+            button.tag = index
+            return button
+        }
+        choiceButtons.last?.keyEquivalent = "\r"
+
+        // Gaps group the buttons: discarding stands apart, the two copies sit together, and each
+        // save gets its own room.
+        let buttonRow = NSStackView(views: [discardButton] + choiceButtons)
+        buttonRow.spacing = 20
+        buttonRow.setCustomSpacing(32, after: discardButton)
+        buttonRow.setCustomSpacing(8, after: choiceButtons[0])
 
         let stack = NSStackView(views: [imageView, trimSlider, rangeLabel, sizeRow, buttonRow])
         stack.orientation = .vertical
@@ -148,20 +165,23 @@ final class RecordingEditorController: NSWindowController {
         estimateTask?.cancel()
         sizeLabel.stringValue = "Estimating…"
         let edit = self.edit
-        let format = self.format
         let frames = recording.frames
         let fps = recording.fps
 
         estimateTask = Task { [weak self] in
             try? await Task.sleep(for: .milliseconds(250))
             guard !Task.isCancelled else { return }
-            let bytes = await Task.detached(priority: .utility) {
-                try? await edit.estimatedByteCount(of: frames, fps: fps, format: format)
+            let estimates = await Task.detached(priority: .utility) {
+                var estimates: [String] = []
+                for format in [ExportFormat.gif, .mp4] {
+                    let bytes = try? await edit.estimatedByteCount(of: frames, fps: fps, format: format)
+                    let size = bytes.map { "about \(ByteCountFormatter.string(fromByteCount: Int64($0), countStyle: .file))" } ?? "size unknown"
+                    estimates.append("\(format.displayName) \(size)")
+                }
+                return estimates
             }.value
             guard !Task.isCancelled, let self else { return }
-            self.sizeLabel.stringValue = bytes.map {
-                "about \(ByteCountFormatter.string(fromByteCount: Int64($0), countStyle: .file))"
-            } ?? "size unknown"
+            self.sizeLabel.stringValue = estimates.joined(separator: "  ·  ")
         }
     }
 
@@ -169,18 +189,19 @@ final class RecordingEditorController: NSWindowController {
         refreshEstimate()
     }
 
-    @objc private func save() {
-        finish(with: (edit, format))
+    @objc private func choose(_ sender: NSButton) {
+        let choice = Self.choices[sender.tag]
+        finish(with: ReviewDecision(action: choice.action, format: choice.format, edit: edit))
     }
 
     @objc private func discard() {
         finish(with: nil)
     }
 
-    private func finish(with choice: (edit: FrameEdit, format: ExportFormat)?) {
+    private func finish(with decision: ReviewDecision?) {
         estimateTask?.cancel()
         window?.close()
-        onFinish(self, choice)
+        onFinish(self, decision)
     }
 }
 
