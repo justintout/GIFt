@@ -36,6 +36,8 @@ final class RecordingEditorController: NSWindowController {
     private let imageView = NSImageView()
     private let trimSlider: TrimSlider
     private let rangeLabel = NSTextField(labelWithString: "")
+    private let playButton = NSButton()
+    private var playbackTimer: Timer?
     private let scalePopup = NSPopUpButton()
     private let sizeLabel = NSTextField(labelWithString: "")
     private var estimateTask: Task<Void, Never>?
@@ -81,11 +83,26 @@ final class RecordingEditorController: NSWindowController {
         imageView.translatesAutoresizingMaskIntoConstraints = false
         let previewSize = Self.previewSize(width: first.width, height: first.height)
 
-        trimSlider.onChange = { [weak self] index in
+        trimSlider.onTrim = { [weak self] index in
+            self?.pause()
             self?.show(frame: index)
             self?.updateRangeLabel()
             self?.refreshEstimate()
         }
+        trimSlider.onScrub = { [weak self] index in
+            self?.pause()
+            self?.show(frame: index)
+        }
+
+        playButton.isBordered = false
+        playButton.target = self
+        playButton.action = #selector(togglePlayback)
+        // A key equivalent rather than a key handler, so Space works whatever has focus.
+        playButton.keyEquivalent = " "
+        setPlayButton(playing: false)
+        let rangeRow = NSStackView(views: [playButton, rangeLabel])
+        rangeRow.alignment = .centerY
+        rangeRow.spacing = 6
 
         for scale in Self.scales {
             let size = FrameEdit(range: 0...0, scale: scale).outputSize(width: first.width, height: first.height)
@@ -137,7 +154,7 @@ final class RecordingEditorController: NSWindowController {
             sizeRow.addArrangedSubview(sizeLabel)
         }
 
-        let stack = NSStackView(views: [imageView, trimSlider, rangeLabel, sizeRow] + (estimatesFitBeside ? [] : [sizeLabel]) + buttonRows)
+        let stack = NSStackView(views: [imageView, trimSlider, rangeRow, sizeRow] + (estimatesFitBeside ? [] : [sizeLabel]) + buttonRows)
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = 12
@@ -158,6 +175,9 @@ final class RecordingEditorController: NSWindowController {
             imageView.heightAnchor.constraint(equalToConstant: previewSize.height),
             trimSlider.widthAnchor.constraint(equalTo: stack.widthAnchor)
         ] + buttonRows.map { $0.widthAnchor.constraint(equalTo: stack.widthAnchor) })
+
+        // Arrow keys step the playhead from the moment the window opens.
+        window?.initialFirstResponder = trimSlider
 
         if buttonRows.count > 1 {
             // Matching widths line the two pairs up in columns.
@@ -236,6 +256,65 @@ final class RecordingEditorController: NSWindowController {
         }
     }
 
+    // MARK: Playback
+
+    @objc private func togglePlayback() {
+        if playbackTimer == nil { play() } else { pause() }
+    }
+
+    private func play() {
+        let range = trimSlider.range
+        if trimSlider.playhead >= range.upperBound {
+            trimSlider.setPlayhead(range.lowerBound)
+            show(frame: range.lowerBound)
+        }
+        setPlayButton(playing: true)
+        scheduleNextFrame()
+    }
+
+    private func pause() {
+        playbackTimer?.invalidate()
+        playbackTimer = nil
+        setPlayButton(playing: false)
+    }
+
+    private func setPlayButton(playing: Bool) {
+        let name = playing ? "pause.fill" : "play.fill"
+        playButton.image = NSImage(systemSymbolName: name, accessibilityDescription: playing ? "Pause" : "Play")
+    }
+
+    /// Loops the kept range. Each frame stays up for its own recorded duration, so playback runs
+    /// at the timing the saved file will have.
+    private func scheduleNextFrame() {
+        playbackTimer = Timer.scheduledTimer(withTimeInterval: frameDuration(at: trimSlider.playhead), repeats: false) { [weak self] _ in
+            MainActor.assumeIsolated { self?.advance() }
+        }
+    }
+
+    private func advance() {
+        let range = trimSlider.range
+        let next = trimSlider.playhead < range.upperBound ? trimSlider.playhead + 1 : range.lowerBound
+        trimSlider.setPlayhead(next)
+        show(frame: next)
+        scheduleNextFrame()
+    }
+
+    /// Mirrors GIFWriter: a frame lasts until the next one, and the last kept frame repeats the gap
+    /// before it.
+    private func frameDuration(at index: Int) -> Double {
+        let range = trimSlider.range
+        let fallback = 1.0 / Double(max(recording.fps, 1))
+        let gap: Double
+        if index < range.upperBound {
+            gap = seconds(at: index + 1) - seconds(at: index)
+        } else if index > range.lowerBound {
+            gap = seconds(at: index) - seconds(at: index - 1)
+        } else {
+            return fallback
+        }
+        return gap > 0 ? gap : fallback
+    }
+
     @objc private func outputChanged() {
         refreshEstimate()
     }
@@ -250,38 +329,54 @@ final class RecordingEditorController: NSWindowController {
     }
 
     private func finish(with decision: ReviewDecision?) {
+        pause()
         estimateTask?.cancel()
         window?.close()
         onFinish(self, decision)
     }
 }
 
-/// A track with two handles that pick the first and last frame to keep.
+/// A track with two handles that pick the first and last frame to keep, and a playhead inside
+/// them that marks the frame on screen. Grabbing a handle trims; clicking anywhere else scrubs.
 @MainActor
 final class TrimSlider: NSView {
-    private enum Handle { case lower, upper }
+    private enum Drag { case lower, upper, playhead }
 
     private static let handleWidth: CGFloat = 8
+    /// How far beyond a handle's edge a click still grabs it.
+    private static let handleSlop: CGFloat = 4
 
     private let count: Int
     private(set) var range: ClosedRange<Int>
+    private(set) var playhead = 0
     /// Called while a handle moves, with the frame under that handle.
-    var onChange: ((Int) -> Void)?
-    private var dragging: Handle?
+    var onTrim: ((Int) -> Void)?
+    /// Called when the user scrubs or steps the playhead, with its new frame.
+    var onScrub: ((Int) -> Void)?
+    private var dragging: Drag?
 
     init(count: Int) {
         self.count = count
         range = 0...max(count - 1, 0)
         super.init(frame: .zero)
         translatesAutoresizingMaskIntoConstraints = false
+        focusRingType = .none
     }
 
     required init?(coder: NSCoder) {
         nil
     }
 
+    override var acceptsFirstResponder: Bool { true }
+
     override var intrinsicContentSize: NSSize {
         NSSize(width: NSView.noIntrinsicMetric, height: 24)
+    }
+
+    /// Kept inside the trimmed range.
+    func setPlayhead(_ index: Int) {
+        playhead = min(max(index, range.lowerBound), range.upperBound)
+        needsDisplay = true
     }
 
     override func draw(_ dirtyRect: NSRect) {
@@ -296,6 +391,8 @@ final class TrimSlider: NSView {
         NSRect(x: lowerX, y: groove.minY, width: upperX - lowerX, height: groove.height).fill()
 
         NSColor.labelColor.setFill()
+        NSRect(x: x(for: playhead) - 1, y: bounds.minY, width: 2, height: bounds.height).fill()
+
         for handleX in [lowerX, upperX] {
             let handle = NSRect(x: handleX - Self.handleWidth / 2, y: bounds.minY + 2, width: Self.handleWidth, height: bounds.height - 4)
             NSBezierPath(roundedRect: handle, xRadius: 2, yRadius: 2).fill()
@@ -303,14 +400,24 @@ final class TrimSlider: NSView {
     }
 
     override func mouseDown(with event: NSEvent) {
+        window?.makeFirstResponder(self)
         let pointX = convert(event.locationInWindow, from: nil).x
-        // Whichever handle is closer moves, so a click anywhere on the track does something.
-        let lowerDistance = abs(pointX - x(for: range.lowerBound))
-        let upperDistance = abs(pointX - x(for: range.upperBound))
-        if lowerDistance == upperDistance {
-            dragging = pointX < x(for: range.lowerBound) ? .lower : .upper
-        } else {
-            dragging = lowerDistance < upperDistance ? .lower : .upper
+        let lowerX = x(for: range.lowerBound)
+        let upperX = x(for: range.upperBound)
+        let reach = Self.handleWidth / 2 + Self.handleSlop
+        let nearLower = abs(pointX - lowerX) <= reach
+        let nearUpper = abs(pointX - upperX) <= reach
+
+        switch (nearLower, nearUpper) {
+        case (true, true):
+            // Handles close together: the side of the click decides, so both stay reachable.
+            dragging = pointX < (lowerX + upperX) / 2 ? .lower : .upper
+        case (true, false):
+            dragging = .lower
+        case (false, true):
+            dragging = .upper
+        case (false, false):
+            dragging = .playhead
         }
         move(to: pointX)
     }
@@ -323,20 +430,36 @@ final class TrimSlider: NSView {
         dragging = nil
     }
 
+    override func keyDown(with event: NSEvent) {
+        let step: Int
+        switch event.keyCode {
+        case 123: step = -1  // left arrow
+        case 124: step = 1   // right arrow
+        default:
+            super.keyDown(with: event)
+            return
+        }
+        setPlayhead(playhead + step)
+        onScrub?(playhead)
+    }
+
     private func move(to pointX: CGFloat) {
         guard let dragging else { return }
         let index = self.index(for: pointX)
-        let moved: Int
         switch dragging {
         case .lower:
-            moved = min(index, range.upperBound)
-            range = moved...range.upperBound
+            range = min(index, range.upperBound)...range.upperBound
+            playhead = range.lowerBound
+            onTrim?(playhead)
         case .upper:
-            moved = max(index, range.lowerBound)
-            range = range.lowerBound...moved
+            range = range.lowerBound...max(index, range.lowerBound)
+            playhead = range.upperBound
+            onTrim?(playhead)
+        case .playhead:
+            setPlayhead(index)
+            onScrub?(playhead)
         }
         needsDisplay = true
-        onChange?(moved)
     }
 
     private var trackRect: NSRect {
