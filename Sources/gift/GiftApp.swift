@@ -187,7 +187,7 @@ final class GiftApp: NSObject, NSApplicationDelegate {
                 if self.settings.reviewBeforeSaving {
                     self.review(recording)
                 } else {
-                    self.save(recording, edit: .unchanged(frameCount: recording.frames.count), format: self.settings.exportFormat)
+                    self.export(recording, as: ReviewDecision(action: .save, format: self.settings.exportFormat, edit: .unchanged(frameCount: recording.frames.count)))
                 }
             case .failure(let error):
                 if (error as? Recorder.RecorderError) != .canceled {
@@ -224,25 +224,30 @@ final class GiftApp: NSObject, NSApplicationDelegate {
     }
 
     private func review(_ recording: Recording) {
-        let editor = RecordingEditorController(recording: recording, format: settings.exportFormat) { [weak self] editor, choice in
+        let editor = RecordingEditorController(recording: recording) { [weak self] editor, decision in
             guard let self else { return }
             self.editors.removeAll { $0 === editor }
-            if let choice {
-                self.save(recording, edit: choice.edit, format: choice.format)
+            if let decision {
+                self.export(recording, as: decision)
             }
         }
         editors.append(editor)
         editor.show()
     }
 
-    private func save(_ recording: Recording, edit: FrameEdit, format: ExportFormat) {
+    private func export(_ recording: Recording, as decision: ReviewDecision) {
         updateStatusIcon(.processing)
-        let outputDirectory = settings.outputDirectory
+        let outputDirectory = switch decision.action {
+        case .save: settings.outputDirectory
+        // Kept out of the output folder, but somewhere the system clears on its own schedule,
+        // since the clipboard has to point at a real file for a paste to attach it.
+        case .copy: FileManager.default.temporaryDirectory.appendingPathComponent("Copies", isDirectory: true)
+        }
 
         Task { [weak self] in
             let result: Result<URL, Error>
             do {
-                result = .success(try await RecordingExport.write(recording, edit: edit, format: format, to: outputDirectory))
+                result = .success(try await RecordingExport.write(recording, edit: decision.edit, format: decision.format, to: outputDirectory))
             } catch {
                 result = .failure(error)
             }
@@ -256,8 +261,13 @@ final class GiftApp: NSObject, NSApplicationDelegate {
                 // attaches the recording.
                 NSPasteboard.general.clearContents()
                 NSPasteboard.general.writeObjects([url as NSURL])
-                self.showMessage("Saved and copied \(url.lastPathComponent)")
-                self.previewController.show(url: url)
+                switch decision.action {
+                case .save:
+                    self.showMessage("Saved and copied \(url.lastPathComponent)")
+                    self.previewController.show(url: url)
+                case .copy:
+                    self.showMessage("Copied \(url.lastPathComponent)")
+                }
             case .failure(let error):
                 self.showMessage("Error: \(error.localizedDescription)")
             }
