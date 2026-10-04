@@ -45,6 +45,10 @@ final class RecordingControlsPanel: NSPanel {
             stack.topAnchor.constraint(equalTo: background.topAnchor),
             stack.bottomAnchor.constraint(equalTo: background.bottomAnchor)
         ])
+        // Sized for "Resume", the wider title, so pausing never squeezes the panel.
+        pauseButton.title = "Resume"
+        pauseButton.widthAnchor.constraint(greaterThanOrEqualToConstant: pauseButton.intrinsicContentSize.width).isActive = true
+        pauseButton.title = "Pause"
         contentView = background
         setContentSize(stack.fittingSize)
     }
