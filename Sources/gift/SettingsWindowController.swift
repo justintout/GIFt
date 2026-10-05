@@ -24,14 +24,18 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     private let borderWidthValueLabel = NSTextField(labelWithString: "")
     private let cancelButton = NSButton(title: "Cancel", target: nil, action: nil)
     private let saveButton = NSButton(title: "Save", target: nil, action: nil)
+    private let updateLabel = NSTextField(labelWithString: "")
+    private let updateButton = NSButton(title: "", target: nil, action: nil)
+    private let updateChecker: UpdateChecker
     private var settings: Settings
     private let onSave: (Settings) -> Void
     private var isInitialSetup = false
     private var onPermissionGranted: (() -> Void)?
     private var relaunchWatcher: Process?
 
-    init(settings: Settings, onSave: @escaping (Settings) -> Void) {
+    init(settings: Settings, updateChecker: UpdateChecker, onSave: @escaping (Settings) -> Void) {
         self.settings = settings
+        self.updateChecker = updateChecker
         self.onSave = onSave
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 560, height: 500),
                               styleMask: [.titled, .closable, .fullSizeContentView],
@@ -48,6 +52,8 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         setupUI()
         apply(settings: settings)
         updatePermissionRows()
+        updateChecker.onChange = { [weak self] in self?.updateUpdateStatus() }
+        updateUpdateStatus()
     }
 
     required init?(coder: NSCoder) {
@@ -194,7 +200,19 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         let buttonRow = NSStackView(views: [cancelButton, saveButton])
         buttonRow.spacing = 8
         buttonRow.translatesAutoresizingMaskIntoConstraints = false
+
+        // The version and update status share the footer, opposite the buttons.
+        updateLabel.textColor = .secondaryLabelColor
+        updateButton.isBordered = false
+        updateButton.contentTintColor = .linkColor
+        updateButton.target = self
+        updateButton.action = #selector(updateAction)
+        let updateRow = NSStackView(views: [updateLabel, updateButton])
+        updateRow.spacing = 6
+        updateRow.translatesAutoresizingMaskIntoConstraints = false
+
         footer.addSubview(separator)
+        footer.addSubview(updateRow)
         footer.addSubview(buttonRow)
         contentView.addSubview(footer)
 
@@ -217,6 +235,9 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
             buttonRow.topAnchor.constraint(equalTo: footer.topAnchor, constant: 12),
             buttonRow.bottomAnchor.constraint(equalTo: footer.bottomAnchor, constant: -12),
             buttonRow.trailingAnchor.constraint(equalTo: footer.trailingAnchor, constant: -Self.inset),
+            updateRow.leadingAnchor.constraint(equalTo: footer.leadingAnchor, constant: Self.inset),
+            updateRow.centerYAnchor.constraint(equalTo: buttonRow.centerYAnchor),
+            updateRow.trailingAnchor.constraint(lessThanOrEqualTo: buttonRow.leadingAnchor, constant: -12),
 
             pathField.widthAnchor.constraint(equalToConstant: 260),
             opacitySlider.widthAnchor.constraint(equalToConstant: 200),
@@ -226,6 +247,40 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         ])
 
         updateMode()
+    }
+
+    private func updateUpdateStatus() {
+        let version = updateChecker.currentVersion?.description ?? "unknown version"
+        let text: String
+        let action: String?
+        switch updateChecker.state {
+        case .idle:
+            text = "GIFt \(version)"
+            action = "Check for Updates"
+        case .checking:
+            text = "Checking for updates…"
+            action = nil
+        case .upToDate:
+            text = "Up to date  ·  \(version)"
+            action = nil
+        case .available(let release):
+            text = "GIFt \(release.version) is available"
+            action = "Download"
+        case .failed(let reason):
+            text = reason
+            action = "Try Again"
+        }
+        updateLabel.stringValue = text
+        updateButton.title = action ?? ""
+        updateButton.isHidden = action == nil
+    }
+
+    @objc private func updateAction() {
+        if case .available(let release) = updateChecker.state {
+            NSWorkspace.shared.open(release.pageURL)
+        } else {
+            updateChecker.check()
+        }
     }
 
     private static let inset: CGFloat = 16
@@ -293,19 +348,26 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         let name = NSTextField(labelWithString: row.permission.title)
         row.statusLabel.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
         row.statusLabel.textColor = .secondaryLabelColor
+        // The buttons share the title line, in place of the status, so a missing permission does
+        // not add a line. With all three missing, as on a first launch, an extra line each made
+        // the window taller than a 13-inch screen.
+        row.actions.spacing = 6
+        row.actions.setHuggingPriority(.defaultHigh, for: .horizontal)
+        for button in [row.grantButton, row.settingsButton] {
+            button.controlSize = .small
+            button.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+            row.actions.addArrangedSubview(button)
+        }
         let header = NSStackView()
+        header.alignment = .centerY
         header.addView(name, in: .leading)
         header.addView(row.statusLabel, in: .trailing)
+        header.addView(row.actions, in: .trailing)
 
-        row.actions.spacing = 8
-        row.actions.addArrangedSubview(row.grantButton)
-        row.actions.addArrangedSubview(row.settingsButton)
-
-        let text = NSStackView(views: [header, row.detailLabel, row.actions])
+        let text = NSStackView(views: [header, row.detailLabel])
         text.orientation = .vertical
         text.alignment = .leading
         text.spacing = 2
-        text.setCustomSpacing(6, after: row.detailLabel)
 
         let container = NSStackView(views: [row.statusIcon, text])
         container.alignment = .top
@@ -365,6 +427,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         for row in permissionRows {
             let granted = row.permission.isGranted
             row.statusLabel.stringValue = granted ? "Granted" : "Not granted"
+            row.statusLabel.isHidden = !granted
             row.actions.isHidden = granted
             let required = row.permission == .screenRecording
             let symbol = granted ? "checkmark.circle.fill" : required ? "exclamationmark.triangle.fill" : "circle.dashed"
@@ -399,6 +462,8 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         if Permission.screenRecording.request() {
             if relaunchScheduled {
                 screenRecordingRow?.statusLabel.stringValue = "Restarting GIFt…"
+                screenRecordingRow?.statusLabel.isHidden = false
+                screenRecordingRow?.actions.isHidden = true
                 NSApp.terminate(nil)
             } else {
                 finishPermissionGranted()
