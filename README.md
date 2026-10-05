@@ -15,10 +15,15 @@ It is heavily inspired by [LICEcap](https://www.cockos.com/licecap/) but aims to
 - Adjustable frame rate
 - A configurable shortcut to stop and save; Escape cancels
 - Optionally opens at login
+- Checks GitHub for a newer release when you ask; it never updates itself
+
+## Install
+
+Download the latest `GIFt-<version>.dmg` from [Releases](https://github.com/justintout/GIFt/releases), open it, and drag GIFt to Applications. Releases are signed with a Developer ID and notarized by Apple, so they open without a Gatekeeper warning.
 
 ## Privacy
 
-GIFt captures only the area or window you select after macOS Screen Recording permission is granted. Its own windows, such as the outline and the pause button, never appear in a recording. Recordings are saved locally to the configured output folder; the app has no network dependencies and does not upload recordings or telemetry.
+GIFt captures only the area or window you select after macOS Screen Recording permission is granted. Its own windows, such as the outline and the pause button, never appear in a recording. Recordings are saved locally to the configured output folder. GIFt does not upload recordings or send telemetry. Its only network request is to GitHub's public releases API, and only when you choose Check for Updates.
 
 Two further permissions are optional, and GIFt never prompts for either on its own. Both are listed in Settings with what they do:
 
@@ -46,3 +51,22 @@ scripts/dev_fresh_launch.sh --skip-build
 scripts/dev_fresh_launch.sh --no-reset-defaults
 scripts/dev_fresh_launch.sh --no-launch
 ```
+
+## Releasing
+
+Push a calendar-version tag, `vYYYY.M.N` with N counting releases that month:
+
+```bash
+git tag v2026.10.1 && git push origin v2026.10.1
+```
+
+The Release workflow builds a universal app, signs and notarizes it, packages and notarizes a DMG, and publishes a GitHub release with the DMG and its SHA-256. It needs these repository secrets: `MACOS_CERT_P12_BASE64` and `MACOS_CERT_PASSWORD` (the Developer ID Application certificate), and `ASC_KEY_ID`, `ASC_ISSUER_ID`, and `ASC_KEY_P8` (an App Store Connect API key with the Developer role, for notarization).
+
+To build a release locally instead, store notarization credentials once with `xcrun notarytool store-credentials gift-notary`, then:
+
+```bash
+scripts/build_app.sh --version 2026.10.1 --notarize
+scripts/make_dmg.sh 2026.10.1
+```
+
+The app icon is drawn by `scripts/make_icon.swift`; run `swift scripts/make_icon.swift` after changing it to regenerate `Packaging/AppIcon.icns`.

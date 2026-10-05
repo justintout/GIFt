@@ -24,6 +24,7 @@ final class GiftApp: NSObject, NSApplicationDelegate {
     private var appearanceObservation: NSKeyValueObservation?
     private var iconState: StatusIconState = .idle
     private var stopHotkey: GlobalHotkey?
+    private let updateChecker = UpdateChecker()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory) // Menu bar only, no Dock icon.
@@ -70,6 +71,11 @@ final class GiftApp: NSObject, NSApplicationDelegate {
         menu.autoenablesItems = false
         menu.delegate = self
 
+        let versionItem = NSMenuItem(title: "GIFt \(updateChecker.currentVersion?.description ?? "(unknown version)")", action: nil, keyEquivalent: "")
+        versionItem.isEnabled = false
+        menu.addItem(versionItem)
+        menu.addItem(.separator())
+
         startItem = NSMenuItem(title: "Start Recording", action: #selector(startRecording), keyEquivalent: "")
         stopItem = NSMenuItem(title: "Stop Recording", action: #selector(stopRecording), keyEquivalent: "")
         pauseItem = NSMenuItem(title: "Pause Recording", action: #selector(togglePause), keyEquivalent: "")
@@ -102,6 +108,7 @@ final class GiftApp: NSObject, NSApplicationDelegate {
         let settingsItem = NSMenuItem(title: "Settings…", action: #selector(openSettings), keyEquivalent: ",")
         settingsItem.keyEquivalentModifierMask = [.command]
         menu.addItem(settingsItem)
+        menu.addItem(NSMenuItem(title: "Check for Updates…", action: #selector(checkForUpdates), keyEquivalent: ""))
 
         menu.addItem(NSMenuItem(title: "Open Output Folder", action: #selector(openOutputFolder), keyEquivalent: ""))
         menu.addItem(.separator())
@@ -403,9 +410,15 @@ final class GiftApp: NSObject, NSApplicationDelegate {
         showSettings(initialSetup: !settings.hasCompletedInitialSetup)
     }
 
+    /// The result shows in the Settings footer, since the menu closes as soon as this is chosen.
+    @objc private func checkForUpdates() {
+        showSettings(initialSetup: !settings.hasCompletedInitialSetup)
+        updateChecker.check()
+    }
+
     private func showSettings(initialSetup: Bool, onPermissionGranted: (() -> Void)? = nil) {
         if settingsController == nil {
-            settingsController = SettingsWindowController(settings: settings) { [weak self] newSettings in
+            settingsController = SettingsWindowController(settings: settings, updateChecker: updateChecker) { [weak self] newSettings in
                 guard let self else { return }
                 self.settings = newSettings
                 Settings.save(newSettings)
