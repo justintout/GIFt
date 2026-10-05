@@ -31,7 +31,7 @@
   <div class="page-hero paper">
     <div class="wrap">
       <h1>Agents</h1>
-      <p>Coding agents can record what they built and show it to you. GIFt gives them a command to drive it and a grid to measure the screen with.</p>
+      <p>How to let coding agents and AI apps take screenshots and record with GIFt.</p>
     </div>
   </div>
 
@@ -58,14 +58,14 @@
 
     <article class="doc-body">
       <h2 id="overview">Overview</h2>
-      <p>When an agent changes an interface, a short GIF of the change says more than a paragraph about it. With agent control on, an agent can:</p>
+      <p>With agent control on, an agent can:</p>
       <ul>
         <li>take a screenshot with a measurement grid drawn in, to find exactly where the change is,</li>
         <li>record that area, or a whole window, for a few seconds or while it keeps working,</li>
         <li>open the result in Quick Look in front of you, and give you the file to attach to a pull request.</li>
       </ul>
-      <p>GIFt does the capture itself, under its own Screen Recording permission. The agent never needs that permission, and nothing leaves your Mac.</p>
-      <p>There are two ways in. They reach the same six operations.</p>
+      <p>GIFt does the capture under its own Screen Recording permission, so the agent does not need that permission. Recordings stay on your Mac.</p>
+      <p>Agents reach GIFt in one of two ways. Both offer the same six operations.</p>
       <div class="cards">
         <a class="card" href="#command">
           <strong>The gift command</strong>
@@ -77,7 +77,7 @@
         </a>
       </div>
       <div class="callout">
-        <p><strong>Which one?</strong> If your agent has a shell, use the command and the skill. They cost the agent nothing until it needs them, and they work in any agent, script, or CI job. Use MCP when the app has no shell.</p>
+        <p><strong>Which one?</strong> If your agent has a shell, use the command and the skill. The skill is loaded only when a task needs it, while MCP tools are loaded into every conversation. Use MCP when the app has no shell.</p>
       </div>
 
       <h2 id="enable">Turn on agent control</h2>
@@ -101,7 +101,7 @@
       </div>
 
       <h2 id="skill">Add the skill</h2>
-      <p>The skill is a short instruction file that teaches an agent when to record and how: the grid workflow, the commands, and what each error means. It ships inside GIFt, and <code>gift skill</code> prints it, so it always matches your installed version.</p>
+      <p>The skill is an instruction file that tells an agent when and how to record: the grid workflow, the commands, and what each error means. It ships inside GIFt, and <code>gift skill</code> prints it, so it always matches your installed version.</p>
       <h3>Claude Code</h3>
       <p>Install it as a personal skill, available in every project:</p>
       <pre><code>mkdir -p ~/.claude/skills/gift
@@ -131,7 +131,7 @@ standing instructions, so you can record GIFs of your work with GIFt.</code></pr
       <p>Recordings from agents save straight to your output folder in your chosen format, or in the one the agent asks for. They skip the review window, so nothing waits on a click, and they leave your clipboard alone.</p>
 
       <h2 id="grid">The measurement grid</h2>
-      <p>An agent sees the screen only through screenshots, and screenshots are in pixels, which differ from screen points on a Retina display. The grid removes the guesswork. With <code>--grid</code>, GIFt draws lines across every display and labels each intersection with its coordinates in points, the same numbers <code>--area</code> takes. The agent reads the coordinates off the image and passes them straight back.</p>
+      <p>An agent sees the screen only through screenshots. Screenshots are in pixels, and on a Retina display one screen point is two pixels. With <code>--grid</code>, GIFt draws lines across every display and labels each intersection with its coordinates in points, the same numbers <code>--area</code> takes. The agent reads the coordinates off the image and passes them straight back.</p>
       <figure class="shot">
         <img src="assets/grid-screenshot.png" width="1400" height="896" loading="lazy" alt="This page in a browser window, with a red grid drawn over it. Each intersection is labeled with its screen coordinates, such as 500,300 and 900,600.">
         <figcaption>A real <code>gift screenshot --grid --area 240,180,1000,640</code> of this page. The labels give screen points, so the heading starts near 500,300.</figcaption>

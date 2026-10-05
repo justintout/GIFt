@@ -378,6 +378,9 @@ strong { font-weight: 650; }
 
 .split { display: grid; grid-template-columns: 1fr 1fr; gap: 48px; align-items: center; }
 .split .copy h2 { margin-top: 12px; }
+.split.top { align-items: start; }
+.split.top .copy h2 { margin-top: 0; }
+.cards.three { grid-template-columns: repeat(3, 1fr); }
 .split .copy p { color: var(--ink-soft); }
 .split ul { padding-left: 1.2em; color: var(--ink-soft); }
 
@@ -539,6 +542,7 @@ kbd {
 
 @media (max-width: 900px) {
   .hero .wrap, .split { grid-template-columns: 1fr; gap: 40px; }
+  .cards.three { grid-template-columns: 1fr; }
   .features { grid-template-columns: 1fr 1fr; }
   .doc { grid-template-columns: 1fr; gap: 0; padding-top: 24px; }
   .doc-nav { display: none; }
