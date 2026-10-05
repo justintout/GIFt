@@ -113,7 +113,8 @@ struct IndicatorStyle: Codable, Equatable {
     static let fillOpacityRange: ClosedRange<CGFloat> = 0...0.4
     static let borderWidthRange: ClosedRange<CGFloat> = 1...8
 
-    static let defaultColor = NSColor(srgbRed: 0, green: 0.48, blue: 1, alpha: 1)
+    /// The teal of the app icon's front frame, #1C8C8C.
+    static let defaultColor = NSColor(srgbRed: 28.0 / 255, green: 140.0 / 255, blue: 140.0 / 255, alpha: 1)
     static let `default` = IndicatorStyle(color: defaultColor, fillOpacity: 0.08, borderWidth: 2)
 
     var red: CGFloat
