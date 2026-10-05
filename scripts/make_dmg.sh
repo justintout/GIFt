@@ -50,6 +50,7 @@ rm -f "$DMG_PATH"
   -s "$ROOT/Packaging/dmg_settings.py" \
   -D app="$APP_BUNDLE" \
   -D icon="$ROOT/Packaging/AppIcon.icns" \
+  -D background="$ROOT/Packaging/dmg-background.png" \
   "GIFt" "$DMG_PATH"
 
 echo "==> Signing with: $SIGN_IDENTITY"
