@@ -1,0 +1,120 @@
+name: Release
+
+# A vYYYY.M.N tag builds, signs, and notarizes GIFt, then publishes a GitHub release with the DMG.
+# Running the workflow by hand does the same work with a version you give it, but uploads the DMG
+# as a workflow artifact instead of publishing, so the pipeline can be checked without a release.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version to build, YYYY.M.N (not published)
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          # The build number is the commit count, which needs the full history.
+          fetch-depth: 0
+
+      # Pinned so a CI build matches a desk build.
+      - run: sudo xcode-select -s /Applications/Xcode_26.2.app
+
+      - name: Read the version
+        id: version
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          if [[ "$GITHUB_EVENT_NAME" == "push" ]]; then
+            version="${GITHUB_REF_NAME#v}"
+          else
+            version="$INPUT_VERSION"
+          fi
+          if [[ ! "$version" =~ ^[0-9]{4}\.[0-9]{1,2}\.[0-9]+$ ]]; then
+            echo "::error::'$version' is not a YYYY.M.N version."
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - run: swift test --skip testEncodePerformance
+
+      - name: Import the signing certificate and notarization key
+        env:
+          MACOS_CERT_P12_BASE64: ${{ secrets.MACOS_CERT_P12_BASE64 }}
+          MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+        run: |
+          for name in MACOS_CERT_P12_BASE64 MACOS_CERT_PASSWORD ASC_KEY_ID ASC_ISSUER_ID ASC_KEY_P8; do
+            test -n "${!name}" || { echo "::error::The $name secret is not set. See the README's Releasing section."; exit 1; }
+          done
+
+          # A throwaway keychain, made the default so notarytool stores its profile there too.
+          KEYCHAIN="$RUNNER_TEMP/signing.keychain-db"
+          echo "KEYCHAIN=$KEYCHAIN" >> "$GITHUB_ENV"
+          keychain_password="$(uuidgen)"
+          security create-keychain -p "$keychain_password" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "$keychain_password" "$KEYCHAIN"
+          security list-keychains -d user -s "$KEYCHAIN"
+          security default-keychain -s "$KEYCHAIN"
+
+          printf '%s' "$MACOS_CERT_P12_BASE64" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security import "$RUNNER_TEMP/cert.p12" -k "$KEYCHAIN" -P "$MACOS_CERT_PASSWORD" -T /usr/bin/codesign
+          rm "$RUNNER_TEMP/cert.p12"
+          # The .p12 holds only the certificate and its key. Apple's intermediates complete the
+          # chain codesign builds; both generations, since Developer ID certificates come from
+          # either.
+          for ca in DeveloperIDCA DeveloperIDG2CA; do
+            curl -fsSL "https://www.apple.com/certificateauthority/$ca.cer" -o "$RUNNER_TEMP/$ca.cer"
+            security import "$RUNNER_TEMP/$ca.cer" -k "$KEYCHAIN"
+          done
+          # Lets codesign use the key without a GUI prompt.
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$keychain_password" "$KEYCHAIN" > /dev/null
+
+          printf '%s' "$ASC_KEY_P8" > "$RUNNER_TEMP/AuthKey.p8"
+          xcrun notarytool store-credentials gift-notary \
+            --key "$RUNNER_TEMP/AuthKey.p8" --key-id "$ASC_KEY_ID" --issuer "$ASC_ISSUER_ID" \
+            --keychain "$KEYCHAIN"
+          rm "$RUNNER_TEMP/AuthKey.p8"
+
+      - name: Build and notarize the app
+        run: scripts/build_app.sh --version "${{ steps.version.outputs.version }}" --notarize
+
+      - name: Package and notarize the DMG
+        run: scripts/make_dmg.sh "${{ steps.version.outputs.version }}"
+
+      - name: Publish the release
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            "dist/GIFt-$VERSION.dmg" "dist/GIFt-$VERSION.dmg.sha256" \
+            --title "GIFt $VERSION" --generate-notes --verify-tag
+
+      - name: Keep the DMG from a manual run
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@v4
+        with:
+          name: GIFt-${{ steps.version.outputs.version }}
+          path: |
+            dist/GIFt-${{ steps.version.outputs.version }}.dmg
+            dist/GIFt-${{ steps.version.outputs.version }}.dmg.sha256
+
+      - name: Remove the signing keychain
+        if: always()
+        run: |
+          if [[ -n "${KEYCHAIN:-}" && -f "$KEYCHAIN" ]]; then
+            security delete-keychain "$KEYCHAIN"
+          fi
