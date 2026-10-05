@@ -418,10 +418,10 @@ final class GiftApp: NSObject, NSApplicationDelegate {
 
     private func showSettings(initialSetup: Bool, onPermissionGranted: (() -> Void)? = nil) {
         if settingsController == nil {
-            settingsController = SettingsWindowController(settings: settings, updateChecker: updateChecker) { [weak self] newSettings in
+            settingsController = SettingsWindowController(settings: settings, updateChecker: updateChecker) { [weak self] change in
                 guard let self else { return }
-                self.settings = newSettings
-                Settings.save(newSettings)
+                change(&self.settings)
+                Settings.save(self.settings)
                 self.applySettings()
             }
         }
