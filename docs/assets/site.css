@@ -207,33 +207,49 @@ strong { font-weight: 650; }
 .hero .wrap { display: grid; grid-template-columns: 1.05fr 0.95fr; gap: 56px; align-items: center; }
 .hero h1 span { color: var(--teal); }
 .hero .lede { font-size: 1.25rem; color: var(--ink-soft); max-width: 34em; }
-.hero .actions { display: flex; flex-wrap: wrap; gap: 12px; margin: 28px 0 14px; }
+.hero .actions { display: flex; flex-wrap: wrap; align-items: center; gap: 16px; margin: 28px 0 14px; }
 .hero .fineprint { font-size: 0.9rem; color: var(--ink-faint); }
 
-.tag {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  font: 800 0.8rem/1 var(--font-display);
-  letter-spacing: 0.02em;
-  color: var(--cream);
-  /* Fixed rather than themed: cream text needs the dark coral in both appearances. */
-  background: #c7462a;
-  padding: 7px 14px 7px 22px;
-  clip-path: polygon(12px 0, 100% 0, 100% 100%, 12px 100%, 0 50%);
-  border-radius: 0 6px 6px 0;
-  position: relative;
+/* The download button as a gift tag, like the teal tags on the DMG window: a pointed end with a
+   punched hole, hanging from its point so it swings a little on hover. The shadow sits on the
+   outer element because clip-path would cut it off the inner one. */
+
+.download-tag {
+  display: inline-block;
+  text-decoration: none;
+  filter: drop-shadow(0 6px 12px rgba(19, 107, 107, 0.3));
+  transform-origin: 6px 50%;
+  transition: transform 0.25s cubic-bezier(0.3, 1.6, 0.5, 1);
 }
-.tag::before {
+.download-tag:hover { transform: rotate(-3deg); }
+.download-tag span {
+  position: relative;
+  display: block;
+  padding: 15px 26px 15px 44px;
+  background: var(--button);
+  color: var(--cream);
+  font: 900 1.05rem/1 var(--font-display);
+  letter-spacing: 0.01em;
+  clip-path: polygon(20px 0, calc(100% - 10px) 0, 100% 10px, 100% calc(100% - 10px), calc(100% - 10px) 100%, 20px 100%, 0 50%);
+}
+.download-tag span::before {
   content: "";
   position: absolute;
-  left: 11px;
+  left: 20px;
   top: 50%;
-  width: 5px;
-  height: 5px;
-  margin-top: -2.5px;
+  width: 9px;
+  height: 9px;
+  margin-top: -4.5px;
   border-radius: 50%;
-  background: var(--cream);
+  background: var(--paper);
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.35);
+}
+.download-tag:hover span { background: var(--button-hover); }
+.download-tag:focus-visible { outline: none; }
+.download-tag:focus-visible span { outline: 3px solid var(--coral); outline-offset: -6px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .download-tag { transition: none; }
 }
 
 /* The hero picture: a desktop with a selection being recorded. */
