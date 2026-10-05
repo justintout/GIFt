@@ -82,7 +82,7 @@ fi
 SIGN_IDENTITY="${GIFT_SIGN_IDENTITY:-}"
 if [[ -z "$SIGN_IDENTITY" ]]; then
   SIGN_IDENTITY="$(security find-identity -v -p codesigning 2>/dev/null \
-    | awk -F'"' '/Developer ID Application/ { print $2; exit }')"
+    | awk -F'"' '!found && /Developer ID Application/ { print $2; found = 1 }')"
 fi
 if [[ -z "$SIGN_IDENTITY" ]]; then
   SIGN_IDENTITY="-"
