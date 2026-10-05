@@ -378,9 +378,13 @@ strong { font-weight: 650; }
 
 .split { display: grid; grid-template-columns: 1fr 1fr; gap: 48px; align-items: center; }
 .split .copy h2 { margin-top: 12px; }
-.split.top { align-items: start; }
-.split.top .copy h2 { margin-top: 0; }
 .cards.three { grid-template-columns: repeat(3, 1fr); }
+
+/* Quick start: the steps side by side, each number above its text. */
+.steps.row { grid-template-columns: repeat(4, 1fr); gap: 16px; }
+.steps.row li { padding: 68px 20px 22px; }
+.steps.row li::before { left: 20px; top: 20px; }
+.steps.row li p { margin-top: 6px; }
 .split .copy p { color: var(--ink-soft); }
 .split ul { padding-left: 1.2em; color: var(--ink-soft); }
 
@@ -543,6 +547,7 @@ kbd {
 @media (max-width: 900px) {
   .hero .wrap, .split { grid-template-columns: 1fr; gap: 40px; }
   .cards.three { grid-template-columns: 1fr; }
+  .steps.row { grid-template-columns: 1fr 1fr; }
   .features { grid-template-columns: 1fr 1fr; }
   .doc { grid-template-columns: 1fr; gap: 0; padding-top: 24px; }
   .doc-nav { display: none; }
@@ -553,7 +558,7 @@ kbd {
   .nav a.optional { display: none; }
   .nav a { padding: 8px 9px; }
   .site-header .wrap { gap: 10px; }
-  .features, .cards { grid-template-columns: 1fr; }
+  .features, .cards, .steps.row { grid-template-columns: 1fr; }
   .hero { padding: 44px 0 56px; }
   .section { padding: 56px 0; }
   .site-footer nav { margin-left: 0; }
