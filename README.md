@@ -69,4 +69,4 @@ scripts/build_app.sh --version 2026.10.1 --notarize
 scripts/make_dmg.sh 2026.10.1
 ```
 
-The app icon is drawn by `scripts/make_icon.swift`; run `swift scripts/make_icon.swift` after changing it to regenerate `Packaging/AppIcon.icns`. The DMG background is drawn the same way by `scripts/make_dmg_background.swift`, which writes `Packaging/dmg-background.png` and its `@2x` twin.
+The app icon is drawn by `scripts/make_icon.swift`; run `swift scripts/make_icon.swift` after changing it to regenerate `Packaging/AppIcon.icns`. The DMG window's wrapping-paper background is drawn the same way by `scripts/make_dmg_background.swift`, which writes `Packaging/dmg-background.png` and its `@2x` twin.
