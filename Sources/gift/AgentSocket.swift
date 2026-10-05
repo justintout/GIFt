@@ -15,16 +15,19 @@ struct AgentRequest: Codable {
     var grid: Bool?
     var spacing: Int?
     var path: String?
+    var discard: Bool?
 }
 
+/// `path` is nil when a recording was discarded.
 struct AgentFile: Codable {
-    let path: String
+    let path: String?
 }
 
 enum AgentErrorCode: String, Codable {
     case failed
     case badRequest = "bad-request"
     case noPermission = "no-permission"
+    case disabled
 }
 
 /// Either `result` or `error` and `code`.

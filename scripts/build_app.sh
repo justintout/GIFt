@@ -135,6 +135,8 @@ cat > "$APP_BUNDLE/Contents/Info.plist" <<'EOF'
 EOF
 perl -pi -e "s/__BUILD_NUMBER__/$BUILD_NUMBER/g; s/__VERSION__/$VERSION/g" "$APP_BUNDLE/Contents/Info.plist"
 cp "$ROOT/Packaging/AppIcon.icns" "$APP_BUNDLE/Contents/Resources/AppIcon.icns"
+# `gift skill` prints this copy, so the skill always matches the build it ships in.
+cp "$ROOT/skills/gift/SKILL.md" "$APP_BUNDLE/Contents/Resources/SKILL.md"
 
 cp "$BIN_PATH" "$APP_BUNDLE/Contents/MacOS/GIFt"
 chmod +x "$APP_BUNDLE/Contents/MacOS/GIFt"

@@ -67,6 +67,18 @@ final class GiftApp: NSObject, NSApplicationDelegate {
         // as Launch Services runs it, it is the app; with arguments or under any other name, such
         // as a `gift` symlink, it is a client of the running app.
         let arguments = Array(CommandLine.arguments.dropFirst())
+        if arguments == ["mcp"] {
+            Task {
+                do {
+                    try await AgentMCP.serve()
+                    exit(0)
+                } catch {
+                    FileHandle.standardError.write(Data("gift: \(error.localizedDescription)\n".utf8))
+                    exit(1)
+                }
+            }
+            dispatchMain()
+        }
         if !arguments.isEmpty || URL(fileURLWithPath: CommandLine.arguments[0]).lastPathComponent != "GIFt" {
             exit(AgentCLI.run(arguments))
         }

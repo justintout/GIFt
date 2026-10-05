@@ -40,16 +40,19 @@ struct AgentWindow: Codable, Sendable {
 struct AgentStatus: Codable, Sendable {
     /// One of idle, starting, recording, stopping.
     let state: String
-    let paused: Bool
-    let hasTarget: Bool
     let fps: Int
     let format: String
     let outputDirectory: String
-    /// Spacing of the visible grid in points, or nil when it is hidden.
-    let gridSpacing: Int?
     let screenRecordingPermitted: Bool
     /// The file the last agent recording was saved to.
     let lastRecording: String?
+    let displays: [AgentDisplay]
+}
+
+/// What a recording is taken from. Exactly one is set.
+struct AgentTarget: Codable, Sendable {
+    var area: AgentRect?
+    var window: UInt32?
 }
 
 enum AgentControlError: LocalizedError {
@@ -57,6 +60,7 @@ enum AgentControlError: LocalizedError {
     case busy
     case notRecording
     case offScreen
+    case noTarget
     case invalidFrameRate(Int)
     case invalidGridSpacing(Int)
     case fileNotFound(String)
@@ -67,11 +71,13 @@ enum AgentControlError: LocalizedError {
         case .screenRecordingNotPermitted:
             return "GIFt does not have Screen Recording permission. GIFt has opened its Settings window; ask the user to grant the permission there."
         case .busy:
-            return "GIFt is already recording. Stop or cancel that recording first."
+            return "GIFt is already recording. Stop that recording first."
         case .notRecording:
             return "GIFt is not recording."
         case .offScreen:
             return "That area is not on any display."
+        case .noTarget:
+            return "Give an area or a window to record, not both."
         case .invalidFrameRate(let fps):
             return "\(fps) fps is not offered. Choose one of \(Settings.allowedFrameRates.map(String.init).joined(separator: ", "))."
         case .invalidGridSpacing(let spacing):
@@ -125,21 +131,15 @@ extension GiftApp {
     func agentStatus() -> AgentStatus {
         AgentStatus(
             state: "\(recorder.state)",
-            paused: recorder.isPaused,
-            hasTarget: recorder.hasTarget,
             fps: recorder.fps,
             format: (agentSession.format ?? settings.exportFormat).rawValue,
             outputDirectory: settings.outputDirectory.path,
-            gridSpacing: gridOverlay.spacing,
             screenRecordingPermitted: CGPreflightScreenCaptureAccess(),
-            lastRecording: agentSession.lastRecording?.path
+            lastRecording: agentSession.lastRecording?.path,
+            displays: NSScreen.screens.enumerated().map { index, screen in
+                AgentDisplay(id: screen.displayID, frame: AgentRect(screen.globalFrame), scale: screen.backingScaleFactor, isPrimary: index == 0)
+            }
         )
-    }
-
-    func agentDisplays() -> [AgentDisplay] {
-        NSScreen.screens.enumerated().map { index, screen in
-            AgentDisplay(id: screen.displayID, frame: AgentRect(screen.globalFrame), scale: screen.backingScaleFactor, isPrimary: index == 0)
-        }
     }
 
     /// Frontmost first. Window frames come from the window server, which already uses global
@@ -148,35 +148,20 @@ extension GiftApp {
         openWindows().map { AgentWindow(id: $0.windowID, app: $0.ownerName, title: $0.title, frame: AgentRect($0.frame)) }
     }
 
-    func agentShowGrid(spacing: Int = ScreenGrid.defaultSpacing) throws {
-        guard spacing >= ScreenGrid.minimumSpacing else { throw AgentControlError.invalidGridSpacing(spacing) }
-        gridOverlay.show(spacing: spacing)
-    }
-
-    func agentHideGrid() {
-        gridOverlay.hide()
-    }
-
     /// Saves a PNG of `rect`, or of the whole primary display, and returns its path. With `grid`,
-    /// the measurement grid is shown for the capture and restored to how it was afterwards.
+    /// the measurement grid is drawn on screen for the length of the capture.
     func agentScreenshot(rect: AgentRect?, grid: Bool, spacing: Int = ScreenGrid.defaultSpacing) async throws -> URL {
         try requireScreenRecording()
+        guard spacing >= ScreenGrid.minimumSpacing else { throw AgentControlError.invalidGridSpacing(spacing) }
         let area = rect?.cgRect ?? NSScreen.screens.first?.globalFrame ?? .zero
-        guard agentDisplays().contains(where: { $0.frame.cgRect.intersects(area) }) else { throw AgentControlError.offScreen }
+        guard NSScreen.screens.contains(where: { $0.globalFrame.intersects(area) }) else { throw AgentControlError.offScreen }
 
-        let previousSpacing = gridOverlay.spacing
         if grid {
-            try agentShowGrid(spacing: spacing)
+            gridOverlay.show(spacing: spacing)
+            // The window server composites the grid on its next pass; capturing sooner can miss it.
+            try await Task.sleep(nanoseconds: 150_000_000)
         }
-        defer {
-            if let previousSpacing {
-                gridOverlay.show(spacing: previousSpacing)
-            } else {
-                gridOverlay.hide()
-            }
-        }
-        // The window server composites the grid on its next pass; capturing sooner can miss it.
-        try await Task.sleep(nanoseconds: 150_000_000)
+        defer { gridOverlay.hide() }
 
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("Screenshots", isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -191,41 +176,22 @@ extension GiftApp {
         return url
     }
 
-    /// Sets an area as the recording target and outlines it. Returns the area as clipped to the
-    /// display it mostly covers.
-    func agentSelectArea(_ rect: AgentRect) throws -> AgentRect {
-        try requireScreenRecording()
-        guard canChangeTarget else { throw AgentControlError.busy }
-        let area = rect.cgRect.standardized
-        let screen = NSScreen.screens.max { overlap($0.globalFrame, area) < overlap($1.globalFrame, area) }
-        guard let screen, overlap(screen.globalFrame, area) > 0 else { throw AgentControlError.offScreen }
-
-        let selected = try recorder.setSelection(rect: NSScreen.appKitBounds(fromWindowBounds: area), on: screen)
-        indicatorWindow.show(rect: selected, recording: false)
-        return AgentRect(NSScreen.appKitBounds(fromWindowBounds: selected))
-    }
-
-    /// Sets one window as the recording target. The user's Bring Window to Front setting applies,
-    /// as it does when they pick the window from the menu.
-    func agentSelectWindow(id: UInt32) async throws -> AgentRect {
-        try requireScreenRecording()
-        guard canChangeTarget else { throw AgentControlError.busy }
-        if settings.bringWindowToFront, let candidate = openWindows().first(where: { $0.windowID == id }) {
-            WindowForegrounding.bringToFront(candidate)
-        }
-        let frame = try await recorder.setWindow(windowID: id)
-        indicatorWindow.show(rect: frame, recording: false)
-        return AgentRect(NSScreen.appKitBounds(fromWindowBounds: frame))
-    }
-
-    /// Returns once frames are being captured. The frame rate and format apply to this recording
-    /// only; the user's settings are left alone.
-    func agentStart(fps: Int?, format: ExportFormat?) async throws {
+    /// Selects the target, outlines it, and returns once frames are being captured. The frame rate
+    /// and format apply to this recording only; the user's settings are left alone.
+    func agentStart(_ target: AgentTarget, fps: Int?, format: ExportFormat?) async throws {
         try requireScreenRecording()
         guard recorder.state == .idle else { throw AgentControlError.busy }
-        guard recorder.hasTarget else { throw Recorder.RecorderError.noSelection }
+        if let fps, !Settings.allowedFrameRates.contains(fps) { throw AgentControlError.invalidFrameRate(fps) }
+
+        switch (target.area, target.window) {
+        case (let area?, nil):
+            try selectArea(area)
+        case (nil, let window?):
+            try await selectWindow(window)
+        default:
+            throw AgentControlError.noTarget
+        }
         if let fps {
-            guard Settings.allowedFrameRates.contains(fps) else { throw AgentControlError.invalidFrameRate(fps) }
             recorder.fps = fps
         }
         agentSession.format = format
@@ -234,16 +200,15 @@ extension GiftApp {
         }
     }
 
-    func agentSetPaused(_ paused: Bool) throws {
-        guard recorder.state == .recording else { throw AgentControlError.notRecording }
-        if recorder.isPaused != paused {
-            togglePause()
+    /// Stops the recording and returns the saved file once it is written, or discards it and
+    /// returns nil. Called while idle, it returns the last agent recording, so a recording the
+    /// user stopped from the menu is not lost.
+    func agentStop(discard: Bool) async throws -> URL? {
+        if discard {
+            guard recorder.state == .recording || recorder.state == .starting else { throw AgentControlError.notRecording }
+            cancelRecording()
+            return nil
         }
-    }
-
-    /// Stops the recording and returns the saved file once it is written. Called while idle, it
-    /// returns the last agent recording, so a recording the user stopped from the menu is not lost.
-    func agentStop() async throws -> URL {
         switch recorder.state {
         case .recording:
             stopRecording()
@@ -255,9 +220,22 @@ extension GiftApp {
         return try await agentSession.awaitResult()
     }
 
-    func agentCancel() throws {
-        guard recorder.state == .recording || recorder.state == .starting else { throw AgentControlError.notRecording }
-        cancelRecording()
+    private func selectArea(_ rect: AgentRect) throws {
+        let area = rect.cgRect.standardized
+        let screen = NSScreen.screens.max { overlap($0.globalFrame, area) < overlap($1.globalFrame, area) }
+        guard let screen, overlap(screen.globalFrame, area) > 0 else { throw AgentControlError.offScreen }
+        let selected = try recorder.setSelection(rect: NSScreen.appKitBounds(fromWindowBounds: area), on: screen)
+        indicatorWindow.show(rect: selected, recording: false)
+    }
+
+    /// The user's Bring Window to Front setting applies, as it does when they pick the window
+    /// from the menu.
+    private func selectWindow(_ id: UInt32) async throws {
+        if settings.bringWindowToFront, let candidate = openWindows().first(where: { $0.windowID == id }) {
+            WindowForegrounding.bringToFront(candidate)
+        }
+        let frame = try await recorder.setWindow(windowID: id)
+        indicatorWindow.show(rect: frame, recording: false)
     }
 
     /// Shows a recording to the user in Quick Look, the same preview GIFt opens after a save.

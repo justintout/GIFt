@@ -57,6 +57,7 @@ extension GiftApp {
         } catch {
             let code: AgentErrorCode = switch error {
             case AgentControlError.screenRecordingNotPermitted, Recorder.RecorderError.permissionDenied: .noPermission
+            case AgentRequestError.disabled: .disabled
             case is AgentRequestError: .badRequest
             default: .failed
             }
@@ -65,39 +66,21 @@ extension GiftApp {
     }
 
     private func perform(_ request: AgentRequest) async throws -> any Encodable {
+        guard settings.agentControlEnabled else { throw AgentRequestError.disabled }
         switch request.command {
         case "status":
             return agentStatus()
-        case "displays":
-            return agentDisplays()
         case "windows":
             return agentWindows()
-        case "grid-show":
-            try agentShowGrid(spacing: request.spacing ?? ScreenGrid.defaultSpacing)
-            return agentStatus()
-        case "grid-hide":
-            agentHideGrid()
-            return agentStatus()
         case "screenshot":
             let url = try await agentScreenshot(rect: request.area, grid: request.grid ?? false, spacing: request.spacing ?? ScreenGrid.defaultSpacing)
             return AgentFile(path: url.path)
-        case "select-area":
-            guard let area = request.area else { throw AgentRequestError.missing("area") }
-            return try agentSelectArea(area)
-        case "select-window":
-            guard let window = request.window else { throw AgentRequestError.missing("window") }
-            return try await agentSelectWindow(id: window)
         case "start":
-            try await agentStart(fps: request.fps, format: request.format)
-            return agentStatus()
-        case "pause", "resume":
-            try agentSetPaused(request.command == "pause")
+            try await agentStart(AgentTarget(area: request.area, window: request.window), fps: request.fps, format: request.format)
             return agentStatus()
         case "stop":
-            return AgentFile(path: try await agentStop().path)
-        case "cancel":
-            try agentCancel()
-            return agentStatus()
+            let url = try await agentStop(discard: request.discard ?? false)
+            return AgentFile(path: url?.path)
         case "show":
             guard let path = request.path else { throw AgentRequestError.missing("path") }
             try agentShow(path: path)
@@ -109,11 +92,13 @@ extension GiftApp {
 }
 
 enum AgentRequestError: LocalizedError {
+    case disabled
     case unknownCommand(String)
     case missing(String)
 
     var errorDescription: String? {
         switch self {
+        case .disabled: return "Agent control is off. Ask the user to turn on Allow Agents in GIFt's Settings, under Agents."
         case .unknownCommand(let command): return "Unknown command \(command)."
         case .missing(let field): return "The request needs \(field)."
         }

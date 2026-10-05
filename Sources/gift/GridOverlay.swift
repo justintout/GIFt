@@ -8,13 +8,9 @@ import GiftCore
 @MainActor
 final class GridOverlay {
     private var windows: [NSWindow] = []
-    private(set) var spacing: Int?
-
-    var isVisible: Bool { spacing != nil }
 
     func show(spacing: Int) {
         hide()
-        self.spacing = spacing
         windows = NSScreen.screens.map { screen in
             let window = NSWindow(contentRect: screen.frame, styleMask: .borderless, backing: .buffered, defer: false)
             window.level = .statusBar
@@ -34,7 +30,6 @@ final class GridOverlay {
     func hide() {
         windows.forEach { $0.orderOut(nil) }
         windows.removeAll()
-        spacing = nil
     }
 }
 
@@ -84,8 +79,9 @@ private final class GridView: NSView {
             format: "display %u  origin %d,%d  size %dx%d pt  scale %gx",
             displayID, Int(globalFrame.minX), Int(globalFrame.minY), Int(globalFrame.width), Int(globalFrame.height), scale
         )
-        // Below the menu bar, which covers the top of the main display.
-        drawLabel(summary, at: CGPoint(x: bounds.midX - 160, y: 40), size: 13)
+        // Top left, inside the first cell and below the menu bar, so a screenshot of any area
+        // that starts at the display's corner includes it.
+        drawLabel(summary, at: CGPoint(x: 8, y: 40), size: 13)
     }
 
     private func local(x: Int) -> CGFloat { CGFloat(x) - globalFrame.minX }
