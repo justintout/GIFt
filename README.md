@@ -54,13 +54,9 @@ scripts/dev_fresh_launch.sh --no-launch
 
 ## Releasing
 
-Push a calendar-version tag, `vYYYY.M.N` with N counting releases that month:
+Run the Release workflow by hand on `main`, from the Actions tab or with `gh workflow run release.yml`. It picks the next calendar version, `vYYYY.M.N` with N counting that month's releases; pass `-f version=YYYY.M.N` to choose one instead.
 
-```bash
-git tag v2026.10.1 && git push origin v2026.10.1
-```
-
-The Release workflow builds a universal app, signs and notarizes it, packages and notarizes a DMG, and publishes a GitHub release with the DMG and its SHA-256. It needs these repository secrets: `MACOS_CERT_P12_BASE64` and `MACOS_CERT_PASSWORD` (the Developer ID Application certificate), and `ASC_KEY_ID`, `ASC_ISSUER_ID`, and `ASC_KEY_P8` (an App Store Connect API key with the Developer role, for notarization).
+The workflow runs the tests, builds a universal app, signs and notarizes it, and packages and notarizes a DMG. Only when all of that passes does it create the tag and publish a GitHub release with the DMG and its SHA-256, so a failed run leaves nothing behind. **Do not push a `v*` tag by hand**: the tag is the result of a release, not the trigger. It needs these repository secrets: `MACOS_CERT_P12_BASE64` and `MACOS_CERT_PASSWORD` (the Developer ID Application certificate), and `ASC_KEY_ID`, `ASC_ISSUER_ID`, and `ASC_KEY_P8` (an App Store Connect API key with the Developer role, for notarization).
 
 To build a release locally instead, store notarization credentials once with `xcrun notarytool store-credentials gift-notary`, then:
 
