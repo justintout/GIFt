@@ -5,20 +5,23 @@ import GiftCore
 @main
 @MainActor
 final class GiftApp: NSObject, NSApplicationDelegate {
-    private let recorder = Recorder()
-    private let previewController = GIFPreviewController()
+    let recorder = Recorder()
+    let previewController = GIFPreviewController()
+    let gridOverlay = GridOverlay()
+    let agentSession = AgentSession()
     private var statusItem: NSStatusItem!
     private var startItem: NSMenuItem!
     private var stopItem: NSMenuItem!
     private var pauseItem: NSMenuItem!
     private var selectAreaItem: NSMenuItem!
     private var selectWindowItem: NSMenuItem!
+    private var gridItem: NSMenuItem!
     private let windowMenu = NSMenu(title: "Select Window")
     private var fpsItems: [NSMenuItem] = []
-    private let indicatorWindow = SelectionIndicatorWindow()
+    let indicatorWindow = SelectionIndicatorWindow()
     private let controlsPanel = RecordingControlsPanel()
     private var editors: [RecordingEditorController] = []
-    private var settings = Settings.load()
+    private(set) var settings = Settings.load()
     private var settingsController: SettingsWindowController?
     private var processingIndicator: NSProgressIndicator?
     private var appearanceObservation: NSKeyValueObservation?
@@ -92,6 +95,9 @@ final class GiftApp: NSObject, NSApplicationDelegate {
         selectWindowItem.submenu = windowMenu
         menu.addItem(selectWindowItem)
 
+        gridItem = NSMenuItem(title: "Show Measurement Grid", action: #selector(toggleGrid), keyEquivalent: "")
+        menu.addItem(gridItem)
+
         menu.addItem(.separator())
 
         let fpsMenu = NSMenu(title: "Frame Rate")
@@ -121,7 +127,7 @@ final class GiftApp: NSObject, NSApplicationDelegate {
 
     /// The single place menu enablement and titles are decided, so no code path can leave the menu
     /// showing an action that is not available.
-    private func updateMenuState() {
+    func updateMenuState() {
         switch recorder.state {
         case .idle:
             startItem.title = "Start Recording"
@@ -147,11 +153,12 @@ final class GiftApp: NSObject, NSApplicationDelegate {
         fpsItems.forEach { $0.isEnabled = canChangeTarget }
         selectAreaItem.isEnabled = canChangeTarget
         selectWindowItem.isEnabled = canChangeTarget
+        gridItem.state = gridOverlay.isVisible ? .on : .off
     }
 
     /// The recording reads its target and frame rate when it starts, so neither may move underneath
     /// a recording that is already running.
-    private var canChangeTarget: Bool { recorder.state == .idle }
+    var canChangeTarget: Bool { recorder.state == .idle }
 
     @objc private func startRecording() {
         guard ensureScreenRecordingAccess(onGranted: { [weak self] in self?.startRecording() }) else { return }
@@ -163,10 +170,19 @@ final class GiftApp: NSObject, NSApplicationDelegate {
         beginRecording()
     }
 
-    private func beginRecording() {
+    /// - Parameter forAgent: An agent's recording skips the review window and is saved as soon as
+    ///   it stops, because nobody is watching to make the choices the review asks for. The result
+    ///   goes to `agentSession`, whoever stopped it.
+    /// - Parameter onStarted: Called once, when the capture is running or has failed to start.
+    func beginRecording(forAgent: Bool = false, onStarted: ((Result<Void, Error>) -> Void)? = nil) {
         guard recorder.state == .idle else {
             appLog.info("start requested while already recording; ignoring")
+            onStarted?(.failure(AgentControlError.busy))
             return
+        }
+        var onStarted = onStarted
+        if forAgent {
+            agentSession.recordingStarted()
         }
 
         // Enabled before the capture starts, because preparing it can take seconds and this is the
@@ -176,6 +192,8 @@ final class GiftApp: NSObject, NSApplicationDelegate {
         recorder.start { [weak self] status in
             guard let self else { return }
             appLog.info("recorder emitted status: \(status, privacy: .public)")
+            onStarted?(.success(()))
+            onStarted = nil
             self.updateMenuState()
             self.updateStatusIcon(.recording)
             self.indicatorWindow.setRecording(true)
@@ -187,7 +205,13 @@ final class GiftApp: NSObject, NSApplicationDelegate {
             self.indicatorWindow.setRecording(false)
             self.controlsPanel.hide()
             EscTap.shared.disable()
+            onStarted?(result.map { _ in () })
+            onStarted = nil
 
+            if forAgent {
+                self.finishAgentRecording(result)
+                return
+            }
             switch result {
             case .success(let recording):
                 if self.settings.reviewBeforeSaving {
@@ -203,7 +227,7 @@ final class GiftApp: NSObject, NSApplicationDelegate {
         }
     }
 
-    @objc private func stopRecording() {
+    @objc func stopRecording() {
         guard recorder.state == .recording else { return }
         indicatorWindow.hide()
         controlsPanel.hide()
@@ -223,7 +247,7 @@ final class GiftApp: NSObject, NSApplicationDelegate {
         EscTap.shared.disable()
     }
 
-    @objc private func togglePause() {
+    @objc func togglePause() {
         recorder.setPaused(!recorder.isPaused)
         controlsPanel.setPaused(recorder.isPaused)
         updateMenuState()
@@ -354,7 +378,7 @@ final class GiftApp: NSObject, NSApplicationDelegate {
 
     /// Read from the window server rather than ScreenCaptureKit because the menu has to be built
     /// synchronously as it opens. The chosen window is resolved to an `SCWindow` when it is picked.
-    private func openWindows() -> [WindowCandidate] {
+    func openWindows() -> [WindowCandidate] {
         let options: CGWindowListOption = [.optionOnScreenOnly, .excludeDesktopElements]
         guard let listed = CGWindowListCopyWindowInfo(options, kCGNullWindowID) as? [[String: Any]] else {
             return []
@@ -402,6 +426,15 @@ final class GiftApp: NSObject, NSApplicationDelegate {
         showMessage("Frame rate set to \(sender.tag) fps")
     }
 
+    @objc private func toggleGrid() {
+        if gridOverlay.isVisible {
+            gridOverlay.hide()
+        } else {
+            gridOverlay.show(spacing: ScreenGrid.defaultSpacing)
+        }
+        updateMenuState()
+    }
+
     @objc private func openOutputFolder() {
         NSWorkspace.shared.open(settings.outputDirectory)
     }
@@ -432,7 +465,7 @@ final class GiftApp: NSObject, NSApplicationDelegate {
         NSApp.terminate(nil)
     }
 
-    private func ensureScreenRecordingAccess(onGranted: (() -> Void)? = nil) -> Bool {
+    func ensureScreenRecordingAccess(onGranted: (() -> Void)? = nil) -> Bool {
         guard !CGPreflightScreenCaptureAccess() else { return true }
         showSettings(initialSetup: false, onPermissionGranted: onGranted)
         return false
@@ -440,11 +473,11 @@ final class GiftApp: NSObject, NSApplicationDelegate {
 
     /// Stands in for the system notifications the app used to post. Messages land on the start item
     /// so they are visible the next time the menu is opened, and the tooltip carries live state.
-    private func showMessage(_ text: String) {
+    func showMessage(_ text: String) {
         startItem.title = text
     }
 
-    private func updateStatusIcon(_ state: StatusIconState) {
+    func updateStatusIcon(_ state: StatusIconState) {
         iconState = state
         guard let button = statusItem.button else { return }
         switch state {
