@@ -15,7 +15,6 @@ final class GiftApp: NSObject, NSApplicationDelegate {
     private var pauseItem: NSMenuItem!
     private var selectAreaItem: NSMenuItem!
     private var selectWindowItem: NSMenuItem!
-    private var gridItem: NSMenuItem!
     private let windowMenu = NSMenu(title: "Select Window")
     private var fpsItems: [NSMenuItem] = []
     let indicatorWindow = SelectionIndicatorWindow()
@@ -95,9 +94,6 @@ final class GiftApp: NSObject, NSApplicationDelegate {
         selectWindowItem.submenu = windowMenu
         menu.addItem(selectWindowItem)
 
-        gridItem = NSMenuItem(title: "Show Measurement Grid", action: #selector(toggleGrid), keyEquivalent: "")
-        menu.addItem(gridItem)
-
         menu.addItem(.separator())
 
         let fpsMenu = NSMenu(title: "Frame Rate")
@@ -153,7 +149,6 @@ final class GiftApp: NSObject, NSApplicationDelegate {
         fpsItems.forEach { $0.isEnabled = canChangeTarget }
         selectAreaItem.isEnabled = canChangeTarget
         selectWindowItem.isEnabled = canChangeTarget
-        gridItem.state = gridOverlay.isVisible ? .on : .off
     }
 
     /// The recording reads its target and frame rate when it starts, so neither may move underneath
@@ -424,15 +419,6 @@ final class GiftApp: NSObject, NSApplicationDelegate {
         Settings.save(settings)
         fpsItems.forEach { $0.state = ($0 == sender) ? .on : .off }
         showMessage("Frame rate set to \(sender.tag) fps")
-    }
-
-    @objc private func toggleGrid() {
-        if gridOverlay.isVisible {
-            gridOverlay.hide()
-        } else {
-            gridOverlay.show(spacing: ScreenGrid.defaultSpacing)
-        }
-        updateMenuState()
     }
 
     @objc private func openOutputFolder() {

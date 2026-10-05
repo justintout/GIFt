@@ -151,12 +151,10 @@ extension GiftApp {
     func agentShowGrid(spacing: Int = ScreenGrid.defaultSpacing) throws {
         guard spacing >= ScreenGrid.minimumSpacing else { throw AgentControlError.invalidGridSpacing(spacing) }
         gridOverlay.show(spacing: spacing)
-        updateMenuState()
     }
 
     func agentHideGrid() {
         gridOverlay.hide()
-        updateMenuState()
     }
 
     /// Saves a PNG of `rect`, or of the whole primary display, and returns its path. With `grid`,
@@ -176,7 +174,6 @@ extension GiftApp {
             } else {
                 gridOverlay.hide()
             }
-            updateMenuState()
         }
         // The window server composites the grid on its next pass; capturing sooner can miss it.
         try await Task.sleep(nanoseconds: 150_000_000)
