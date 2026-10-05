@@ -88,9 +88,14 @@ Cons:
 
 ## Verification
 
-Verified:
+Verified on 2026-10-05 with a Developer ID build from `scripts/build_app.sh --arm64-only`, on one 1512x982 point display at 2x:
 
 - `swift build` and `swift test` pass (27 tests).
-- The client offline: `gift help` and a bare `gift` print the help text and exit 0; malformed areas, a missing `grid` action, an unknown command, and `record` with both `--area` and `--window` exit 2 with a message on stderr; with no socket, `.build/debug/gift status` exits 3 and explains that it cannot launch the app from outside a bundle.
+- Auto-launch: with no GIFt running and a stale socket file left behind, `gift status` through a symlink named `gift` launched `dist/GIFt.app` in the background and printed the status, in 0.5 s in total. The app's parent process was launchd, so it ran in app mode.
+- `status`, `displays`, `windows`, `grid show --spacing 50`, and `grid hide` returned the expected JSON and exited 0.
+- `show` with a relative path to an existing GIF opened Quick Look and printed the absolute path. `show /nope.gif` exited 1 with "No file at /nope.gif."
+- `stop` while idle exited 1 with "GIFt is not recording."
+- Usage errors exit 2 with a message on stderr: a malformed area, `grid` without an action, an unknown command, and `record` with both `--area` and `--window`. `gift help` and a bare `gift` print the help text.
+- `.build/debug/gift status` with nothing listening exits 3 and explains that it cannot launch the app from outside a bundle.
 
-Not verified live: the app side of the socket, launching the app from the client, screenshots with the grid, selection, recording, and `show`. `scripts/build_app.sh` hung at the Developer ID `codesign` step (likely a keychain access prompt waiting for the user), so no signed bundle with the Screen Recording grant could be built. An ad-hoc build would not hold the grant, so live testing stopped there. To finish it: build the bundle, run `dist/GIFt.app/Contents/MacOS/GIFt status`, `displays`, `screenshot --grid` (and read the PNG), `select-area`, `record --seconds 3`, and `show` on the result.
+Not verified: the build reported `screenRecordingPermitted: false`, so the grant the user gave an earlier build did not carry over to this one. `screenshot --grid` and `select-area` exited 4 with the permission message, and GIFt opened its Settings window, as designed. Live testing stopped there, as instructed, without granting the permission. Not yet seen working: grid screenshots (including label legibility in the PNG), area selection, `start`, `pause`, `stop` with a real recording, and `record --seconds 3` producing a GIF. Window titles in `gift windows` were empty, because macOS withholds them from apps without Screen Recording.
