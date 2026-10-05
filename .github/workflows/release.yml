@@ -1,48 +1,87 @@
 name: Release
 
-# A vYYYY.M.N tag builds, signs, and notarizes GIFt, then publishes a GitHub release with the DMG.
-# Running the workflow by hand does the same work with a version you give it, but uploads the DMG
-# as a workflow artifact instead of publishing, so the pipeline can be checked without a release.
-
+# Started by hand from the Actions tab, on main. The version is the next calendar version,
+# YYYY.M.N with N counting this month's releases, unless an exact one is given.
+#
+# A tag is not the trigger, it is the result. Everything that can fail runs first: the tests,
+# the signed and notarized app, and the notarized DMG. The tag is created and the release
+# published only after all of it passes, so a failed run leaves nothing behind. Do not push a
+# v* tag by hand.
 on:
-  push:
-    tags: ["v*"]
   workflow_dispatch:
     inputs:
       version:
-        description: Version to build, YYYY.M.N (not published)
-        required: true
+        description: Exact version to release, YYYY.M.N (leave empty for the next one)
+        required: false
+        type: string
 
 permissions:
-  contents: write
+  contents: read
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash -euo pipefail {0}
 
 jobs:
+  # Ahead of the macOS job so a dispatch from the wrong ref fails in seconds.
+  guard:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Dispatched from main
+        env:
+          REF: ${{ github.ref_name }}
+        run: |
+          if [ "${REF}" != "main" ]; then
+            echo "::error::Release must be run on main; this run is on ${REF}."
+            exit 1
+          fi
+
   release:
+    needs: guard
     runs-on: macos-26
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v5
         with:
-          # The build number is the commit count, which needs the full history.
+          # Tags to work out the version, and full history for the build number (the commit count).
           fetch-depth: 0
 
       # Pinned so a CI build matches a desk build.
       - run: sudo xcode-select -s /Applications/Xcode_26.2.app
 
-      - name: Read the version
-        id: version
+      - name: Work out the version
+        id: target
         env:
-          INPUT_VERSION: ${{ inputs.version }}
+          EXACT: ${{ inputs.version }}
         run: |
-          if [[ "$GITHUB_EVENT_NAME" == "push" ]]; then
-            version="${GITHUB_REF_NAME#v}"
+          if [ -n "${EXACT}" ]; then
+            version="${EXACT#v}"
           else
-            version="$INPUT_VERSION"
+            month="$(date -u +%Y.%-m)"
+            last="$(git tag --list "v${month}.*" --sort=-v:refname | head -1)"
+            if [ -z "${last}" ]; then
+              version="${month}.1"
+            else
+              version="${month}.$(( ${last##*.} + 1 ))"
+            fi
           fi
-          if [[ ! "$version" =~ ^[0-9]{4}\.[0-9]{1,2}\.[0-9]+$ ]]; then
-            echo "::error::'$version' is not a YYYY.M.N version."
+
+          if ! printf '%s' "${version}" | grep -qE '^[0-9]{4}\.[0-9]{1,2}\.[0-9]+$'; then
+            echo "::error::'${version}' is not a YYYY.M.N version."
             exit 1
           fi
-          echo "version=$version" >> "$GITHUB_OUTPUT"
+          if git rev-parse "v${version}" >/dev/null 2>&1; then
+            echo "::error::v${version} is already tagged."
+            exit 1
+          fi
+
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "releasing v${version}" >> "$GITHUB_STEP_SUMMARY"
 
       - run: swift test --skip testEncodePerformance
 
@@ -88,33 +127,33 @@ jobs:
           rm "$RUNNER_TEMP/AuthKey.p8"
 
       - name: Build and notarize the app
-        run: scripts/build_app.sh --version "${{ steps.version.outputs.version }}" --notarize
+        run: scripts/build_app.sh --version "${{ steps.target.outputs.version }}" --notarize
 
       - name: Package and notarize the DMG
-        run: scripts/make_dmg.sh "${{ steps.version.outputs.version }}"
+        run: scripts/make_dmg.sh "${{ steps.target.outputs.version }}"
 
-      - name: Publish the release
-        if: github.event_name == 'push'
+      # Everything above this line is a check. The tag is the publish.
+      - name: Tag
+        env:
+          TAG: v${{ steps.target.outputs.version }}
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git tag -a "${TAG}" -m "${TAG}"
+          git push origin "${TAG}"
+
+      - name: Publish the GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
-          VERSION: ${{ steps.version.outputs.version }}
+          VERSION: ${{ steps.target.outputs.version }}
         run: |
-          gh release create "$GITHUB_REF_NAME" \
-            "dist/GIFt-$VERSION.dmg" "dist/GIFt-$VERSION.dmg.sha256" \
-            --title "GIFt $VERSION" --generate-notes --verify-tag
-
-      - name: Keep the DMG from a manual run
-        if: github.event_name == 'workflow_dispatch'
-        uses: actions/upload-artifact@v4
-        with:
-          name: GIFt-${{ steps.version.outputs.version }}
-          path: |
-            dist/GIFt-${{ steps.version.outputs.version }}.dmg
-            dist/GIFt-${{ steps.version.outputs.version }}.dmg.sha256
+          gh release create "v${VERSION}" \
+            "dist/GIFt-${VERSION}.dmg" "dist/GIFt-${VERSION}.dmg.sha256" \
+            --title "GIFt ${VERSION}" --generate-notes --verify-tag
 
       - name: Remove the signing keychain
         if: always()
         run: |
-          if [[ -n "${KEYCHAIN:-}" && -f "$KEYCHAIN" ]]; then
-            security delete-keychain "$KEYCHAIN"
+          if [[ -n "${KEYCHAIN:-}" && -f "${KEYCHAIN}" ]]; then
+            security delete-keychain "${KEYCHAIN}"
           fi
