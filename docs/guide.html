@@ -1,0 +1,162 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>GIFt Guide</title>
+  <meta name="description" content="How to install GIFt, grant its permissions, record an area or a window, review a recording, and change its settings.">
+  <link rel="icon" href="assets/favicon.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Nunito:wght@800;900&display=swap">
+  <link rel="stylesheet" href="assets/site.css">
+  <script src="assets/site.js"></script>
+</head>
+<body>
+  <header class="site-header">
+    <div class="wrap">
+      <a class="brand" href="./"><img src="assets/icon.png" alt=""><span>GIFt</span></a>
+      <nav class="nav" aria-label="Site">
+        <a href="guide.html" aria-current="page">Guide</a>
+        <a href="agents.html">Agents</a>
+        <a href="mcp.html" class="optional">MCP</a>
+        <a href="https://github.com/justintout/GIFt" class="optional">GitHub</a>
+        <button class="theme-toggle" type="button" aria-label="Switch light or dark theme">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4.5"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
+        </button>
+      </nav>
+    </div>
+  </header>
+
+  <div class="page-hero paper">
+    <div class="wrap">
+      <h1>Guide</h1>
+      <p>Everything GIFt does, from the first launch to the last setting.</p>
+    </div>
+  </div>
+
+  <div class="wrap doc">
+    <nav class="doc-nav" aria-label="On this page">
+      <p>On this page</p>
+      <ul>
+        <li><a href="#install">Install</a></li>
+        <li><a href="#permissions">Permissions</a></li>
+        <li><a href="#record-an-area">Record an area</a></li>
+        <li><a href="#record-a-window">Record a window</a></li>
+        <li><a href="#while-recording">While recording</a></li>
+        <li><a href="#review">Review and save</a></li>
+        <li><a href="#settings">Settings</a></li>
+        <li><a href="#updates">Updates</a></li>
+        <li><a href="#privacy">Privacy</a></li>
+      </ul>
+      <p>Agents</p>
+      <ul>
+        <li><a href="agents.html">Agents and the gift command</a></li>
+        <li><a href="mcp.html">MCP for AI apps</a></li>
+      </ul>
+    </nav>
+
+    <article class="doc-body">
+      <h2 id="install">Install</h2>
+      <ol>
+        <li><a href="https://github.com/justintout/GIFt/releases/latest/download/GIFt.dmg">Download the latest GIFt.dmg</a>.</li>
+        <li>Open it and drag GIFt to the Applications folder.</li>
+        <li>Open GIFt from Applications. Its icon appears in the menu bar, and the Settings window opens to finish setup.</li>
+      </ol>
+      <p>GIFt needs macOS 13 Ventura or later and runs natively on Apple silicon and Intel Macs. Every release is signed with a Developer ID and notarized by Apple, so it opens without a Gatekeeper warning. Each release lists the DMG's SHA-256 if you want to check the download.</p>
+
+      <h2 id="permissions">Permissions</h2>
+      <p>GIFt asks for one permission and can use two more. It never prompts for the optional ones on its own. The Permissions section of Settings lists all three with what each one does and a button to grant it.</p>
+      <table>
+        <thead><tr><th>Permission</th><th>Needed for</th></tr></thead>
+        <tbody>
+          <tr><td><strong>Screen Recording</strong></td><td>Required. GIFt cannot capture anything without it. macOS may ask you to quit and reopen GIFt after you grant it.</td></tr>
+          <tr><td><strong>Input Monitoring</strong></td><td>Optional. Lets <kbd>⎋</kbd> Escape cancel a recording while another app is in front. Escape while you select an area works without it.</td></tr>
+          <tr><td><strong>Accessibility</strong></td><td>Optional. Brings only the window you chose to the front, instead of every window its app has open. Used only when Bring window to front is on.</td></tr>
+        </tbody>
+      </table>
+      <p>To change a permission later, open System Settings, then Privacy &amp; Security.</p>
+
+      <h2 id="record-an-area">Record an area</h2>
+      <ol>
+        <li>Click the GIFt icon in the menu bar and choose <strong>Select Area…</strong></li>
+        <li>Drag a box over what you want to record. It can be on any display.</li>
+        <li>Recording starts as soon as you let go. If you turned off Start recording after selecting, choose <strong>Start Recording</strong> from the menu when you are ready.</li>
+      </ol>
+      <p>An outline stays around the area so you can see what is being recorded. GIFt's own windows, including the outline and its buttons, never appear in a recording.</p>
+      <p>Press <kbd>⎋</kbd> Escape while dragging to back out without selecting anything.</p>
+
+      <h2 id="record-a-window">Record a window</h2>
+      <p>Choose <strong>Select Window</strong> from the menu and pick a window from the list. The list shows every open window, frontmost first, by title and app.</p>
+      <p>A window recording captures that window's own content. You can move it, and other windows can cover it, without changing what is recorded. With Bring window to front on, GIFt raises the window before recording starts.</p>
+
+      <h2 id="while-recording">While recording</h2>
+      <p>Two buttons sit beside the outline:</p>
+      <ul>
+        <li><strong>Pause</strong> stops capturing until you press it again. The finished GIF plays straight through each pause.</li>
+        <li><strong>Stop</strong> ends the recording and opens the review window.</li>
+      </ul>
+      <p>From the keyboard, <kbd>⌘</kbd> <kbd>⎋</kbd> stops and saves from any app. You can change that shortcut in Settings. <kbd>⎋</kbd> Escape cancels the recording and throws it away.</p>
+      <p>Clicks inside the recording are marked with a ring, so viewers can see where you clicked. Turn this off with Highlight clicks in Settings.</p>
+
+      <h2 id="review">Review and save</h2>
+      <p>When a recording stops, the review window plays it back. Before anything is written, you can:</p>
+      <ul>
+        <li>Drag either end of the timeline to trim the start or the end.</li>
+        <li>Scale it to 100%, 75%, 50%, or 25% of its size. The window shows the estimated file size as you change it.</li>
+        <li>Choose <strong>Save as GIF</strong> or <strong>Save as MP4</strong> to write it to your output folder, or <strong>Copy as GIF</strong> or <strong>Copy as MP4</strong> to put it on the clipboard without keeping a copy there.</li>
+      </ul>
+      <p>A saved recording is also copied to the clipboard as a file, so pasting it into Slack, a GitHub issue, or an email attaches it. GIFt then opens it in Quick Look.</p>
+      <div class="callout">
+        <p><strong>GIF or MP4?</strong> GIF plays everywhere, inline, with no player. MP4 makes much smaller files when a recording has a lot of motion, such as scrolling or video.</p>
+      </div>
+      <p>Files are named <code>gift-&lt;time&gt;.gif</code> or <code>.mp4</code>. To keep files small, GIFt caps the longer side at 1280 pixels, or 960 pixels at 24 fps and above. Turn off Review before saving to skip this window and save straight away in your chosen format.</p>
+
+      <h2 id="settings">Settings</h2>
+      <p>Open Settings from the menu, or press <kbd>⌘</kbd> <kbd>,</kbd> while the menu is open. Every change applies as you make it.</p>
+      <h3>General</h3>
+      <table>
+        <tbody>
+          <tr><td><strong>Folder</strong></td><td>Where recordings are saved. Your Movies folder at first. Open Output Folder in the menu opens it.</td></tr>
+          <tr><td><strong>Save as</strong></td><td>GIF or MP4, used when review is off.</td></tr>
+          <tr><td><strong>Review before saving</strong></td><td>Opens the review window after each recording. On at first.</td></tr>
+          <tr><td><strong>Start recording after selecting</strong></td><td>Starts as soon as you pick an area or window. On at first.</td></tr>
+          <tr><td><strong>Bring window to front</strong></td><td>Raises a window you pick before recording it.</td></tr>
+          <tr><td><strong>Open at login</strong></td><td>Starts GIFt when you log in.</td></tr>
+        </tbody>
+      </table>
+      <h3>Recording</h3>
+      <table>
+        <tbody>
+          <tr><td><strong>Frame rate</strong></td><td>8, 10, 12, 15, 24, or 30 frames per second. 12 at first. Higher rates look smoother and make larger files. The menu's Frame Rate changes the same setting.</td></tr>
+          <tr><td><strong>Highlight clicks</strong></td><td>Draws a ring wherever you click.</td></tr>
+          <tr><td><strong>Stop and save</strong></td><td>The shortcut that stops a recording from any app. <kbd>⌘</kbd> <kbd>⎋</kbd> at first.</td></tr>
+        </tbody>
+      </table>
+      <h3>Overlay</h3>
+      <p>The color, fill, and border width of the outline drawn around the area being recorded.</p>
+      <h3>Agents</h3>
+      <p>Lets coding agents and AI apps drive GIFt. Off until you turn it on. See <a href="agents.html">Agents</a>.</p>
+
+      <h2 id="updates">Updates</h2>
+      <p>Choose <strong>Check for Updates…</strong> from the menu. GIFt asks GitHub for the latest release and shows the result at the bottom of Settings, with a link to download it. GIFt never checks on its own and never updates itself.</p>
+
+      <h2 id="privacy">Privacy</h2>
+      <p>GIFt captures only the area or window you select, and only after you grant Screen Recording. Recordings are saved on your Mac. GIFt sends no telemetry and uploads nothing. Its only network request is to GitHub's public releases API, and only when you choose Check for Updates.</p>
+      <p>GIFt listens on a socket in your Library folder that only your own user account can open, and refuses every request on it until you turn on agent control. See <a href="agents.html#security">Agents</a> for what turning it on allows.</p>
+    </article>
+  </div>
+
+  <footer class="site-footer">
+    <div class="wrap">
+      <span>GIFt, made by Justin Tout. Inspired by LICEcap.</span>
+      <nav aria-label="Footer">
+        <a href="guide.html">Guide</a>
+        <a href="agents.html">Agents</a>
+        <a href="mcp.html">MCP</a>
+        <a href="https://github.com/justintout/GIFt/releases">Releases</a>
+      </nav>
+    </div>
+  </footer>
+</body>
+</html>

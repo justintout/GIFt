@@ -1,0 +1,207 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>GIFt for Agents</title>
+  <meta name="description" content="Let coding agents record GIFs of their work with GIFt: turn on agent control, install the gift command and the agent skill, and use the measurement grid to pick an area.">
+  <link rel="icon" href="assets/favicon.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Nunito:wght@800;900&display=swap">
+  <link rel="stylesheet" href="assets/site.css">
+  <script src="assets/site.js"></script>
+</head>
+<body>
+  <header class="site-header">
+    <div class="wrap">
+      <a class="brand" href="./"><img src="assets/icon.png" alt=""><span>GIFt</span></a>
+      <nav class="nav" aria-label="Site">
+        <a href="guide.html">Guide</a>
+        <a href="agents.html" aria-current="page">Agents</a>
+        <a href="mcp.html" class="optional">MCP</a>
+        <a href="https://github.com/justintout/GIFt" class="optional">GitHub</a>
+        <button class="theme-toggle" type="button" aria-label="Switch light or dark theme">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4.5"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
+        </button>
+      </nav>
+    </div>
+  </header>
+
+  <div class="page-hero paper">
+    <div class="wrap">
+      <h1>Agents</h1>
+      <p>Coding agents can record what they built and show it to you. GIFt gives them a command to drive it and a grid to measure the screen with.</p>
+    </div>
+  </div>
+
+  <div class="wrap doc">
+    <nav class="doc-nav" aria-label="On this page">
+      <p>On this page</p>
+      <ul>
+        <li><a href="#overview">Overview</a></li>
+        <li><a href="#enable">Turn on agent control</a></li>
+        <li><a href="#command">Install the command</a></li>
+        <li><a href="#skill">Add the skill</a></li>
+        <li><a href="#workflow">How an agent records</a></li>
+        <li><a href="#grid">The measurement grid</a></li>
+        <li><a href="#reference">Command reference</a></li>
+        <li><a href="#security">Security</a></li>
+        <li><a href="#troubleshooting">Troubleshooting</a></li>
+      </ul>
+      <p>Related</p>
+      <ul>
+        <li><a href="mcp.html">MCP for AI apps</a></li>
+        <li><a href="guide.html">Guide</a></li>
+      </ul>
+    </nav>
+
+    <article class="doc-body">
+      <h2 id="overview">Overview</h2>
+      <p>When an agent changes an interface, a short GIF of the change says more than a paragraph about it. With agent control on, an agent can:</p>
+      <ul>
+        <li>take a screenshot with a measurement grid drawn in, to find exactly where the change is,</li>
+        <li>record that area, or a whole window, for a few seconds or while it keeps working,</li>
+        <li>open the result in Quick Look in front of you, and give you the file to attach to a pull request.</li>
+      </ul>
+      <p>GIFt does the capture itself, under its own Screen Recording permission. The agent never needs that permission, and nothing leaves your Mac.</p>
+      <p>There are two ways in. They reach the same six operations.</p>
+      <div class="cards">
+        <a class="card" href="#command">
+          <strong>The gift command</strong>
+          <span>For agents that run shell commands: Claude Code, Codex CLI, Cursor, Aider, and scripts. Pair it with the skill.</span>
+        </a>
+        <a class="card" href="mcp.html">
+          <strong>MCP</strong>
+          <span>For AI apps without a shell: Claude Desktop and the ChatGPT desktop app. Screenshots arrive as images in the chat.</span>
+        </a>
+      </div>
+      <div class="callout">
+        <p><strong>Which one?</strong> If your agent has a shell, use the command and the skill. They cost the agent nothing until it needs them, and they work in any agent, script, or CI job. Use MCP when the app has no shell.</p>
+      </div>
+
+      <h2 id="enable">Turn on agent control</h2>
+      <p>Agent control is off when you install GIFt. While it is off, GIFt refuses every request from the command and from MCP.</p>
+      <ol>
+        <li>Click the GIFt icon in the menu bar and choose <strong>Settings…</strong></li>
+        <li>Open <strong>Agents</strong>.</li>
+        <li>Turn on <strong>Allow agents</strong>.</li>
+      </ol>
+      <p>Read <a href="#security">Security</a> before you turn it on. GIFt also needs Screen Recording permission, which the <a href="guide.html#permissions">guide</a> covers.</p>
+
+      <h2 id="command">Install the command</h2>
+      <p>In Settings, under Agents, click <strong>Install…</strong> next to gift command. macOS asks for your password, and GIFt links <code>/usr/local/bin/gift</code> to itself. That folder is on the default path of every shell, so agents find <code>gift</code> without changes to your shell profile.</p>
+      <p>Check it from a terminal:</p>
+      <pre><code><span class="k">gift</span> status</code></pre>
+      <p>If GIFt is not running, <code>gift</code> starts it in the background first.</p>
+      <p>To skip the install, call the executable inside the app by its full path. It behaves the same way whenever you give it a command:</p>
+      <pre><code>/Applications/GIFt.app/Contents/MacOS/GIFt status</code></pre>
+      <div class="callout">
+        <p>The command and the app are the same file, so they always match. After you update GIFt, the installed command uses the new version with nothing to reinstall.</p>
+      </div>
+
+      <h2 id="skill">Add the skill</h2>
+      <p>The skill is a short instruction file that teaches an agent when to record and how: the grid workflow, the commands, and what each error means. It ships inside GIFt, and <code>gift skill</code> prints it, so it always matches your installed version.</p>
+      <h3>Claude Code</h3>
+      <p>Install it as a personal skill, available in every project:</p>
+      <pre><code>mkdir -p ~/.claude/skills/gift
+<span class="k">gift</span> skill &gt; ~/.claude/skills/gift/SKILL.md</code></pre>
+      <p>Claude Code loads the skill when a task calls for it, such as "record a GIF of the new settings page." Run the second line again after you update GIFt.</p>
+      <h3>Other agents</h3>
+      <p>Agents keep skills and instruction files in different places. The simplest route is to let the agent install the skill where its own harness expects it:</p>
+      <pre><code>Run `gift skill` and install its output as a skill, or add it to your
+standing instructions, so you can record GIFs of your work with GIFt.</code></pre>
+      <p>You can also paste the output of <code>gift skill</code> into an <code>AGENTS.md</code> or a similar instructions file. The <a href="https://github.com/justintout/GIFt/blob/main/skills/gift/SKILL.md">skill's source</a> is on GitHub.</p>
+
+      <h2 id="workflow">How an agent records</h2>
+      <p>A typical run, after an agent changes a page in a web app:</p>
+      <pre><code><span class="c"># 1. Find the thing that changed. The grid labels every 100 points.</span>
+<span class="k">gift</span> screenshot --grid
+<span class="s">{ "path": "/var/folders/…/Screenshots/gift-1791211329847.png" }</span>
+
+<span class="c"># 2. Record just that area while driving the page</span>
+<span class="k">gift</span> record --area 120,340,800,500
+<span class="c">#    ...the agent clicks through the new flow...</span>
+<span class="k">gift</span> stop
+<span class="s">{ "path": "/Users/you/Movies/gift-1791211346917.gif" }</span>
+
+<span class="c"># 3. Put it in front of you</span>
+<span class="k">gift</span> show /Users/you/Movies/gift-1791211346917.gif</code></pre>
+      <p>For a fixed length, <code>gift record --area 120,340,800,500 --seconds 5</code> records, stops, and prints the path in one step. <code>--window ID</code> records a window instead of an area; <code>gift windows</code> lists the IDs.</p>
+      <p>Recordings from agents save straight to your output folder in your chosen format, or in the one the agent asks for. They skip the review window, so nothing waits on a click, and they leave your clipboard alone.</p>
+
+      <h2 id="grid">The measurement grid</h2>
+      <p>An agent sees the screen only through screenshots, and screenshots are in pixels, which differ from screen points on a Retina display. The grid removes the guesswork. With <code>--grid</code>, GIFt draws lines across every display and labels each intersection with its coordinates in points, the same numbers <code>--area</code> takes. The agent reads the coordinates off the image and passes them straight back.</p>
+      <figure class="shot">
+        <img src="assets/grid-screenshot.png" width="1400" height="896" loading="lazy" alt="This page in a browser window, with a red grid drawn over it. Each intersection is labeled with its screen coordinates, such as 500,300 and 900,600.">
+        <figcaption>A real <code>gift screenshot --grid --area 240,180,1000,640</code> of this page. The labels give screen points, so the heading starts near 500,300.</figcaption>
+      </figure>
+      <ul>
+        <li>Lines are 100 points apart, and every fifth one is heavier. <code>--spacing 50</code> draws a finer grid, labeled every 100 points.</li>
+        <li>A banner at the top left of each display names it, with its origin, size in points, and scale.</li>
+        <li>The grid shows on screen only for the instant the screenshot is taken. GIFt keeps its own windows out of recordings, so it never appears in a GIF.</li>
+      </ul>
+      <p>Coordinates start at the top left of the primary display, and y grows downward. Displays to the left of or above the primary one have negative coordinates. <code>gift status</code> lists every display's frame.</p>
+
+      <h2 id="reference">Command reference</h2>
+      <p>Every command prints JSON on standard output and errors on standard error. <code>gift help</code> prints this reference.</p>
+      <table>
+        <thead><tr><th>Command</th><th>What it does</th></tr></thead>
+        <tbody>
+          <tr><td><code>gift status</code></td><td>State, output folder, whether Screen Recording is granted, and each display's frame and scale.</td></tr>
+          <tr><td><code>gift windows</code></td><td>Open windows, frontmost first, with IDs, apps, titles, and frames.</td></tr>
+          <tr><td><code>gift screenshot</code></td><td>Saves a PNG and prints its path. <code>--area X,Y,W,H</code> limits it to an area (default: the primary display). <code>--grid</code> draws the grid in. <code>--spacing N</code> sets the line spacing, 25 points or more.</td></tr>
+          <tr><td><code>gift record</code></td><td>Starts recording <code>--area X,Y,W,H</code> or <code>--window ID</code>. With <code>--seconds N</code>, stops after N seconds and prints the file's path; without it, returns as soon as frames are being captured. <code>--format gif|mp4</code> and <code>--fps 8|10|12|15|24|30</code> apply to this recording only.</td></tr>
+          <tr><td><code>gift stop</code></td><td>Stops, waits for the file, and prints its path. <code>--discard</code> throws the recording away. While idle, prints the last recording's path.</td></tr>
+          <tr><td><code>gift show PATH</code></td><td>Opens a file in Quick Look on your screen.</td></tr>
+          <tr><td><code>gift skill</code></td><td>Prints the agent skill.</td></tr>
+          <tr><td><code>gift mcp</code></td><td>Serves the same operations as MCP tools over standard input and output. See <a href="mcp.html">MCP</a>.</td></tr>
+        </tbody>
+      </table>
+      <h3>Exit codes</h3>
+      <table>
+        <thead><tr><th>Code</th><th>Meaning</th></tr></thead>
+        <tbody>
+          <tr><td><code>0</code></td><td>Success.</td></tr>
+          <tr><td><code>1</code></td><td>GIFt reported a failure. The message says why.</td></tr>
+          <tr><td><code>2</code></td><td>Usage error, such as a malformed area.</td></tr>
+          <tr><td><code>3</code></td><td>GIFt is not running and could not be started.</td></tr>
+          <tr><td><code>4</code></td><td>GIFt does not have Screen Recording permission.</td></tr>
+          <tr><td><code>5</code></td><td>Agent control is off.</td></tr>
+        </tbody>
+      </table>
+
+      <h2 id="security">Security</h2>
+      <p>The command and MCP reach GIFt over a socket at <code>~/Library/Application Support/GIFt/agent.sock</code>. Its folder and the socket itself are readable only by your user account, and GIFt checks that every caller runs as you. Other accounts on the Mac, other machines, and web pages cannot reach it.</p>
+      <div class="callout warn">
+        <p><strong>What turning it on allows.</strong> While agent control is on, any program running as you can take screenshots and record through GIFt, without Screen Recording permission of its own. A screenshot shows only a brief flash of the grid, if it uses one. Recordings show GIFt's outline and the recording icon in the menu bar. Turn agent control off when you are not using it.</p>
+      </div>
+      <p>Recordings stay on your Mac. GIFt uploads nothing, and the agent gets only file paths and, through MCP, the screenshots it asks for.</p>
+
+      <h2 id="troubleshooting">Troubleshooting</h2>
+      <h3><code>gift: command not found</code></h3>
+      <p>Install the command from Settings, under Agents, or use the full path, <code>/Applications/GIFt.app/Contents/MacOS/GIFt</code>.</p>
+      <h3>Exit code 5: agent control is off</h3>
+      <p>Turn on <strong>Allow agents</strong> in Settings, under Agents.</p>
+      <h3>Exit code 4: no Screen Recording permission</h3>
+      <p>GIFt opens its Settings window at the permission. Grant it, let macOS reopen GIFt if it asks, and try again. An agent cannot grant it for you.</p>
+      <h3>Exit code 3: GIFt could not be started</h3>
+      <p>Open GIFt from Applications once. If you moved the app after installing the command, click Reinstall… in Settings so the link points at the new location.</p>
+      <h3>The agent's sandbox blocks the command</h3>
+      <p>Some agents run commands in a sandbox that cannot reach sockets outside the project. Allow the agent to connect to <code>~/Library/Application Support/GIFt/agent.sock</code>, or let it run <code>gift</code> outside the sandbox.</p>
+    </article>
+  </div>
+
+  <footer class="site-footer">
+    <div class="wrap">
+      <span>GIFt, made by Justin Tout. Inspired by LICEcap.</span>
+      <nav aria-label="Footer">
+        <a href="guide.html">Guide</a>
+        <a href="agents.html">Agents</a>
+        <a href="mcp.html">MCP</a>
+        <a href="https://github.com/justintout/GIFt/releases">Releases</a>
+      </nav>
+    </div>
+  </footer>
+</body>
+</html>
