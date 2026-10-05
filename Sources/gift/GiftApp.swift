@@ -44,6 +44,11 @@ final class GiftApp: NSObject, NSApplicationDelegate {
         if !settings.hasCompletedInitialSetup {
             showSettings(initialSetup: true)
         }
+        do {
+            try AgentServer.start { await self.agentReply(to: $0) }
+        } catch {
+            appLog.error("could not open the agent socket at \(AgentSocket.path, privacy: .public): \(error.localizedDescription, privacy: .public)")
+        }
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
@@ -58,6 +63,13 @@ final class GiftApp: NSObject, NSApplicationDelegate {
     }
 
     static func main() {
+        // The bundle's executable doubles as the `gift` command line. Run bare under its own name,
+        // as Launch Services runs it, it is the app; with arguments or under any other name, such
+        // as a `gift` symlink, it is a client of the running app.
+        let arguments = Array(CommandLine.arguments.dropFirst())
+        if !arguments.isEmpty || URL(fileURLWithPath: CommandLine.arguments[0]).lastPathComponent != "GIFt" {
+            exit(AgentCLI.run(arguments))
+        }
         let app = NSApplication.shared
         let delegate = GiftApp()
         app.delegate = delegate
