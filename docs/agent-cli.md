@@ -91,7 +91,7 @@ Cons:
 Verified on 2026-10-05 with a Developer ID build from `scripts/build_app.sh --arm64-only`, on one 1512x982 point display at 2x:
 
 - `swift build` and `swift test` pass (27 tests).
-- Auto-launch: with no GIFt running and a stale socket file left behind, `gift status` through a symlink named `gift` launched `dist/GIFt.app` in the background and printed the status, in 0.5 s in total. The app's parent process was launchd, so it ran in app mode.
+- Auto-launch: with no GIFt running and a stale socket file left behind, `gift status` through a symlink named `gift` launched `dist/GIFt.app` in the background and printed the status, in 0.5 s in total. Launched by `open` with no arguments, the bundle executable ran in app mode and served the socket.
 - `status`, `displays`, `windows`, `grid show --spacing 50`, and `grid hide` returned the expected JSON and exited 0.
 - `show` with a relative path to an existing GIF opened Quick Look and printed the absolute path. `show /nope.gif` exited 1 with "No file at /nope.gif."
 - `stop` while idle exited 1 with "GIFt is not recording."
