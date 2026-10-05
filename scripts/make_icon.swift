@@ -1,9 +1,10 @@
-// Draws GIFt's app icon (the "Frame stack" design) at every size macOS asks for and packs them into
-// Packaging/AppIcon.icns. Run from the repository root: swift scripts/make_icon.swift
+// Draws GIFt's app icon (the "Gift Stack" design in the Paper and Teal palette) at every size
+// macOS asks for and packs them into Packaging/AppIcon.icns.
+// Run from the repository root: swift scripts/make_icon.swift
 //
 // Coordinates are on a 1024-point canvas with the origin at the top left, matching the SVG the
-// design came from. Small sizes are simplified on purpose, the way system icons are: at 32
-// pixels the rearmost frame goes and the ring thickens, and at 16 only the front frame remains,
+// design came from. Small sizes are simplified on purpose, the way system icons are: at 32 pixels
+// the rearmost frame and the bow go and the ring thickens, and at 16 only the front frame remains,
 // centered and enlarged, with a ring at least a pixel wide.
 
 import AppKit
@@ -16,24 +17,102 @@ func color(_ hex: UInt32, _ alpha: CGFloat = 1) -> CGColor {
     CGColor(srgbRed: CGFloat((hex >> 16) & 0xFF) / 255, green: CGFloat((hex >> 8) & 0xFF) / 255, blue: CGFloat(hex & 0xFF) / 255, alpha: alpha)
 }
 
-func roundedRect(_ rect: CGRect, radius: CGFloat) -> CGPath {
-    CGPath(roundedRect: rect, cornerWidth: radius, cornerHeight: radius, transform: nil)
+enum Palette {
+    static let tileTop = color(0xFCF6EA)
+    static let tileBottom = color(0xEADBBE)
+    static let back = color(0xDCC9A6)
+    static let backRibbon = color(0xECDFC6)
+    static let middle = color(0xC4AC84)
+    static let middleRibbon = color(0xD8C5A3)
+    static let front = color(0x1C8C8C)
+    static let ribbon = color(0xFF7A5C)
+    static let knot = color(0xE25C3E)
+    static let ring = color(0xFFF7EA)
+    static let dot = color(0xFF6A48)
 }
 
-func fillRotated(_ context: CGContext, rect: CGRect, radius: CGFloat, degrees: CGFloat, around center: CGPoint, fill: CGColor) {
+/// The stack at 1.4 times the original frames, with the rear frames tucked in and tilted 3° and
+/// 6° so it can fill the tile. Centers were computed so the stack's bounds sit centered on the
+/// tile, 32 points inside its rounded edge at the tightest point.
+enum Stack {
+    static let scale: CGFloat = 1.4
+    static let front = CGPoint(x: 487.2, y: 559.1)
+    static let middle = (center: CGPoint(x: 514.9, y: 501.4), degrees: CGFloat(3))
+    static let back = (center: CGPoint(x: 545.7, y: 470.6), degrees: CGFloat(6))
+    static let rearSize = CGSize(width: 644, height: 504)
+    static let rearRadius: CGFloat = 56
+}
+
+enum Level {
+    /// 64 pixels and up.
+    case full
+    /// 32 pixels.
+    case small
+    /// 16 pixels.
+    case tiny
+
+    init(pixels: Int) {
+        self = pixels <= 16 ? .tiny : pixels <= 32 ? .small : .full
+    }
+}
+
+func fillRoundedRect(_ context: CGContext, _ rect: CGRect, radius: CGFloat, _ fill: CGColor) {
+    context.addPath(CGPath(roundedRect: rect, cornerWidth: radius, cornerHeight: radius, transform: nil))
+    context.setFillColor(fill)
+    context.fillPath()
+}
+
+func fill(_ context: CGContext, _ rect: CGRect, _ fill: CGColor) {
+    context.setFillColor(fill)
+    context.fill(rect)
+}
+
+/// A rear frame with its ribbon, rotated about its center.
+func drawRear(_ context: CGContext, center: CGPoint, degrees: CGFloat, frame: CGColor, ribbon: CGColor) {
+    let size = Stack.rearSize
     context.saveGState()
     context.translateBy(x: center.x, y: center.y)
     context.rotate(by: degrees * .pi / 180)
-    context.translateBy(x: -center.x, y: -center.y)
-    context.addPath(roundedRect(rect, radius: radius))
-    context.setFillColor(fill)
-    context.fillPath()
+    let rect = CGRect(x: -size.width / 2, y: -size.height / 2, width: size.width, height: size.height)
+    fillRoundedRect(context, rect, radius: Stack.rearRadius, frame)
+    let ribbonWidth = 30 * Stack.scale
+    fill(context, CGRect(x: -ribbonWidth / 2, y: rect.minY, width: ribbonWidth, height: rect.height), ribbon)
     context.restoreGState()
 }
 
+/// A frame tied with a ribbon cross, with the record ring and dot where the ribbons meet.
+func drawWrappedFrame(_ context: CGContext, _ rect: CGRect, radius: CGFloat, ribbonWidth: CGFloat, ringRadius: CGFloat, ringWidth: CGFloat, dotRadius: CGFloat) {
+    fillRoundedRect(context, rect, radius: radius, Palette.front)
+    fill(context, CGRect(x: rect.midX - ribbonWidth / 2, y: rect.minY, width: ribbonWidth, height: rect.height), Palette.ribbon)
+    fill(context, CGRect(x: rect.minX, y: rect.midY - ribbonWidth / 2, width: rect.width, height: ribbonWidth), Palette.ribbon)
+
+    let center = CGPoint(x: rect.midX, y: rect.midY)
+    let ring = CGRect(x: center.x - ringRadius, y: center.y - ringRadius, width: ringRadius * 2, height: ringRadius * 2)
+    context.setFillColor(Palette.front)
+    context.fillEllipse(in: ring)
+    context.setStrokeColor(Palette.ring)
+    context.setLineWidth(ringWidth)
+    context.strokeEllipse(in: ring)
+    context.setFillColor(Palette.dot)
+    context.fillEllipse(in: CGRect(x: center.x - dotRadius, y: center.y - dotRadius, width: dotRadius * 2, height: dotRadius * 2))
+}
+
+func drawBow(_ context: CGContext, above top: CGFloat, centerX: CGFloat) {
+    let k = Stack.scale
+    for side: CGFloat in [-1, 1] {
+        context.saveGState()
+        context.translateBy(x: centerX + side * 36 * k, y: top - 14 * k)
+        context.rotate(by: side * 24 * .pi / 180)
+        context.setFillColor(Palette.ribbon)
+        context.fillEllipse(in: CGRect(x: -42 * k, y: -24 * k, width: 84 * k, height: 48 * k))
+        context.restoreGState()
+    }
+    context.setFillColor(Palette.knot)
+    context.fillEllipse(in: CGRect(x: centerX - 15 * k, y: top - 17 * k, width: 30 * k, height: 30 * k))
+}
+
 func drawIcon(pixels: Int) -> NSBitmapImageRep {
-    let simple = pixels <= 32
-    let tiny = pixels <= 16
+    let level = Level(pixels: pixels)
     let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: pixels, pixelsHigh: pixels, bitsPerSample: 8,
                                samplesPerPixel: 4, hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB,
                                bytesPerRow: 0, bitsPerPixel: 0)!
@@ -45,42 +124,41 @@ func drawIcon(pixels: Int) -> NSBitmapImageRep {
     context.translateBy(x: 0, y: CGFloat(pixels))
     context.scaleBy(x: scale, y: -scale)
 
-    // Tile: a light gradient squircle on Apple's icon grid, with a soft drop shadow.
-    let tile = roundedRect(CGRect(x: 100, y: 100, width: 824, height: 824), radius: 185)
+    // Tile: a paper gradient squircle on Apple's icon grid, with a soft drop shadow.
+    let tile = CGPath(roundedRect: CGRect(x: 100, y: 100, width: 824, height: 824), cornerWidth: 185, cornerHeight: 185, transform: nil)
     context.saveGState()
     context.setShadow(offset: CGSize(width: 0, height: -14 * scale), blur: 28 * scale, color: color(0x000000, 0.28))
     context.addPath(tile)
-    context.setFillColor(color(0xE6E9EE))
+    context.setFillColor(Palette.tileBottom)
     context.fillPath()
     context.restoreGState()
     context.saveGState()
     context.addPath(tile)
     context.clip()
-    let gradient = CGGradient(colorsSpace: CGColorSpace(name: CGColorSpace.sRGB), colors: [color(0xF7F8FA), color(0xD5D9E0)] as CFArray, locations: [0, 1])!
+    let gradient = CGGradient(colorsSpace: CGColorSpace(name: CGColorSpace.sRGB), colors: [Palette.tileTop, Palette.tileBottom] as CFArray, locations: [0, 1])!
     context.drawLinearGradient(gradient, start: CGPoint(x: 0, y: 100), end: CGPoint(x: 0, y: 924), options: [])
     context.restoreGState()
 
-    // Frames behind the front one.
-    if !simple {
-        fillRotated(context, rect: CGRect(x: 330, y: 230, width: 460, height: 360), radius: 40, degrees: 8, around: CGPoint(x: 560, y: 410), fill: color(0xB9BEC8))
+    let k = Stack.scale
+    switch level {
+    case .tiny:
+        let width: CGFloat = 760
+        let unit = width / 640
+        let rect = CGRect(x: 512 - width / 2, y: 512 - width * 0.375, width: width, height: width * 0.75)
+        drawWrappedFrame(context, rect, radius: 64 * unit, ribbonWidth: 84 * unit, ringRadius: 150 * unit, ringWidth: 72 * unit, dotRadius: 70 * unit)
+    case .small, .full:
+        if level == .full {
+            drawRear(context, center: Stack.back.center, degrees: Stack.back.degrees, frame: Palette.back, ribbon: Palette.backRibbon)
+        }
+        drawRear(context, center: Stack.middle.center, degrees: Stack.middle.degrees, frame: Palette.middle, ribbon: Palette.middleRibbon)
+        let front = CGRect(x: Stack.front.x - 250 * k, y: Stack.front.y - 195 * k, width: 500 * k, height: 390 * k)
+        let full = level == .full
+        drawWrappedFrame(context, front, radius: 44 * k, ribbonWidth: (full ? 56 : 70) * k, ringRadius: 112 * k,
+                         ringWidth: (full ? 34 : 52) * k, dotRadius: (full ? 50 : 58) * k)
+        if full {
+            drawBow(context, above: front.minY, centerX: front.midX)
+        }
     }
-    if !tiny {
-        fillRotated(context, rect: CGRect(x: 290, y: 270, width: 460, height: 360), radius: 40, degrees: 4, around: CGPoint(x: 520, y: 450), fill: color(0x8E95A3))
-    }
-
-    // Front frame with the record ring.
-    let front = tiny ? CGRect(x: 192, y: 272, width: 640, height: 480) : CGRect(x: 234, y: 330, width: 500, height: 390)
-    context.addPath(roundedRect(front, radius: tiny ? 64 : 44))
-    context.setFillColor(color(0x232428))
-    context.fillPath()
-    let ringCenter = CGPoint(x: front.midX, y: front.midY)
-    let ringRadius: CGFloat = tiny ? 150 : 112
-    context.setStrokeColor(color(0xF5F5F7))
-    context.setLineWidth(tiny ? 72 : simple ? 52 : 34)
-    context.strokeEllipse(in: CGRect(x: ringCenter.x - ringRadius, y: ringCenter.y - ringRadius, width: ringRadius * 2, height: ringRadius * 2))
-    let dot: CGFloat = tiny ? 70 : simple ? 58 : 50
-    context.setFillColor(color(0xFF3B30))
-    context.fillEllipse(in: CGRect(x: ringCenter.x - dot, y: ringCenter.y - dot, width: dot * 2, height: dot * 2))
 
     NSGraphicsContext.restoreGraphicsState()
     return rep
