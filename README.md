@@ -16,14 +16,29 @@ It is heavily inspired by [LICEcap](https://www.cockos.com/licecap/) but aims to
 - A configurable shortcut to stop and save; Escape cancels
 - Optionally opens at login
 - Checks GitHub for a newer release when you ask; it never updates itself
+- Lets coding agents and AI apps take gridded screenshots and record GIFs of their work, once you turn it on
+
+The full documentation is at [justintout.github.io/GIFt](https://justintout.github.io/GIFt/).
 
 ## Install
 
-Download the latest `GIFt-<version>.dmg` from [Releases](https://github.com/justintout/GIFt/releases), open it, and drag GIFt to Applications. Releases are signed with a Developer ID and notarized by Apple, so they open without a Gatekeeper warning.
+Download the [latest GIFt.dmg](https://github.com/justintout/GIFt/releases/latest/download/GIFt.dmg), open it, and drag GIFt to Applications. Releases are signed with a Developer ID and notarized by Apple, so they open without a Gatekeeper warning.
+
+## Agents
+
+Turn on Allow Agents in Settings, under Agents, and install the `gift` command from the same pane. Agents with a shell use the command:
+
+```bash
+gift screenshot --grid                                # a PNG with screen coordinates drawn in
+gift record --area 120,340,800,500 --seconds 5        # prints the saved GIF's path
+gift show ~/Movies/gift-1791211346917.gif             # opens it in Quick Look
+```
+
+`gift skill` prints a skill that teaches an agent this workflow. Apps without a shell, such as Claude Desktop and the ChatGPT desktop app, run `GIFt.app/Contents/MacOS/GIFt mcp` as an MCP server. See [Agents](https://justintout.github.io/GIFt/agents.html) and [MCP](https://justintout.github.io/GIFt/mcp.html).
 
 ## Privacy
 
-GIFt captures only the area or window you select after macOS Screen Recording permission is granted. Its own windows, such as the outline and the pause button, never appear in a recording. Recordings are saved locally to the configured output folder. GIFt does not upload recordings or send telemetry. Its only network request is to GitHub's public releases API, and only when you choose Check for Updates.
+GIFt captures only the area or window you select after macOS Screen Recording permission is granted. Its own windows, such as the outline and the pause button, never appear in a recording. Recordings are saved locally to the configured output folder. GIFt does not upload recordings or send telemetry. While Allow Agents is on, any process running as you can take screenshots and record through GIFt over a socket that only your user account can open. Its only network request is to GitHub's public releases API, and only when you choose Check for Updates.
 
 Two further permissions are optional, and GIFt never prompts for either on its own. Both are listed in Settings with what they do:
 
@@ -64,5 +79,7 @@ To build a release locally instead, store notarization credentials once with `xc
 scripts/build_app.sh --version 2026.10.1 --notarize
 scripts/make_dmg.sh 2026.10.1
 ```
+
+The website in `docs/` is plain HTML and CSS, served by GitHub Pages from `main`. Preview it by opening `docs/index.html` in a browser.
 
 The app icon is drawn by `scripts/make_icon.swift`; run `swift scripts/make_icon.swift` after changing it to regenerate `Packaging/AppIcon.icns`. The DMG window's wrapping-paper background is drawn the same way by `scripts/make_dmg_background.swift`, which writes `Packaging/dmg-background.png` and its `@2x` twin.

@@ -1,0 +1,171 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>GIFt over MCP</title>
+  <meta name="description" content="Connect GIFt to Claude Desktop, the ChatGPT desktop app, and other MCP clients so AI apps can take gridded screenshots and record GIFs on your Mac.">
+  <link rel="icon" href="assets/favicon.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Nunito:wght@800;900&display=swap">
+  <link rel="stylesheet" href="assets/site.css">
+  <script src="assets/site.js"></script>
+</head>
+<body>
+  <header class="site-header">
+    <div class="wrap">
+      <a class="brand" href="./"><img src="assets/icon.png" alt=""><span>GIFt</span></a>
+      <nav class="nav" aria-label="Site">
+        <a href="guide.html">Guide</a>
+        <a href="agents.html">Agents</a>
+        <a href="mcp.html" class="optional" aria-current="page">MCP</a>
+        <a href="https://github.com/justintout/GIFt" class="optional">GitHub</a>
+        <button class="theme-toggle" type="button" aria-label="Switch light or dark theme">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4.5"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
+        </button>
+      </nav>
+    </div>
+  </header>
+
+  <div class="page-hero paper">
+    <div class="wrap">
+      <h1>MCP</h1>
+      <p>How to connect GIFt to AI apps that cannot run shell commands.</p>
+    </div>
+  </div>
+
+  <div class="wrap doc">
+    <nav class="doc-nav" aria-label="On this page">
+      <p>On this page</p>
+      <ul>
+        <li><a href="#when">When to use MCP</a></li>
+        <li><a href="#before">Before you start</a></li>
+        <li><a href="#claude-desktop">Claude Desktop</a></li>
+        <li><a href="#chatgpt">ChatGPT desktop app</a></li>
+        <li><a href="#other-clients">Other clients</a></li>
+        <li><a href="#tools">Tools</a></li>
+        <li><a href="#troubleshooting">Troubleshooting</a></li>
+      </ul>
+      <p>Related</p>
+      <ul>
+        <li><a href="agents.html">Agents and the gift command</a></li>
+        <li><a href="guide.html">Guide</a></li>
+      </ul>
+    </nav>
+
+    <article class="doc-body">
+      <h2 id="when">When to use MCP</h2>
+      <p>The Model Context Protocol lets an AI app start a local program and call the tools it offers. GIFt's executable is that program when it runs as <code>GIFt mcp</code>. It offers the same six operations as the <a href="agents.html#reference">gift command</a>.</p>
+      <ul>
+        <li><strong>Use MCP</strong> in apps that cannot run shell commands, such as Claude Desktop and the ChatGPT desktop app. Screenshots the model takes appear as images in the conversation.</li>
+        <li><strong>Use the command and the skill</strong> in coding agents that have a shell, such as Claude Code and Codex CLI. MCP tools are loaded into every conversation, while a skill is read only when it is needed, and the command also works in scripts. See <a href="agents.html">Agents</a>.</li>
+      </ul>
+
+      <h2 id="before">Before you start</h2>
+      <ol>
+        <li>Install GIFt in <code>/Applications</code> and grant it Screen Recording. The <a href="guide.html#permissions">guide</a> covers this.</li>
+        <li>Turn on <strong>Allow agents</strong> in GIFt's Settings, under Agents. Read <a href="agents.html#security">Security</a> first.</li>
+      </ol>
+      <p>Every client below starts the same command:</p>
+      <pre><code>/Applications/GIFt.app/Contents/MacOS/GIFt mcp</code></pre>
+      <p>Each tool call reaches GIFt separately, so a client keeps working if GIFt quits or restarts between calls. If GIFt is not running, the first call starts it.</p>
+
+      <h2 id="claude-desktop">Claude Desktop</h2>
+      <ol>
+        <li>In Claude Desktop, choose <strong>Claude › Settings…</strong> from the menu bar. This is the app's own settings, not your account settings in the Claude window.</li>
+        <li>Open <strong>Developer</strong> and click <strong>Edit Config</strong>. Claude opens <code>claude_desktop_config.json</code> and creates it if it does not exist.</li>
+        <li>Add GIFt under <code>mcpServers</code>. If the file already lists other servers, add the <code>"gift"</code> entry beside them.
+          <span class="file-label" style="margin-top: 12px">~/Library/Application Support/Claude/claude_desktop_config.json</span>
+          <pre><code>{
+  <span class="s">"mcpServers"</span>: {
+    <span class="s">"gift"</span>: {
+      <span class="s">"command"</span>: <span class="s">"/Applications/GIFt.app/Contents/MacOS/GIFt"</span>,
+      <span class="s">"args"</span>: [<span class="s">"mcp"</span>]
+    }
+  }
+}</code></pre>
+        </li>
+        <li>Quit Claude Desktop completely with <kbd>⌘</kbd> <kbd>Q</kbd> and open it again. Closing the window is not enough.</li>
+        <li>In a new chat, click <strong>+</strong> in the message box, then <strong>Connectors</strong>. <strong>gift</strong> should be listed with its six tools.</li>
+      </ol>
+      <p>Try it: "Take a gridded screenshot of my screen, then record the menu bar for three seconds and show me the GIF."</p>
+      <div class="callout">
+        <p>Claude Desktop asks before running each tool. Approve once, or allow GIFt's tools for the conversation.</p>
+      </div>
+
+      <h2 id="chatgpt">ChatGPT desktop app</h2>
+      <p>The ChatGPT desktop app reads local MCP servers from the same configuration file as Codex, <code>~/.codex/config.toml</code>. Adding GIFt there makes it available in the desktop app, Codex CLI, and the Codex IDE extension.</p>
+      <p>If you have Codex CLI, add it with one command:</p>
+      <pre><code><span class="k">codex</span> mcp add gift -- /Applications/GIFt.app/Contents/MacOS/GIFt mcp</code></pre>
+      <p>Or add it to the file by hand:</p>
+      <span class="file-label">~/.codex/config.toml</span>
+      <pre><code><span class="k">[mcp_servers.gift]</span>
+command = <span class="s">"/Applications/GIFt.app/Contents/MacOS/GIFt"</span>
+args = [<span class="s">"mcp"</span>]
+<span class="c"># Room for recordings up to about a minute. The default is 60 seconds.</span>
+tool_timeout_sec = 90</code></pre>
+      <p>Restart the ChatGPT desktop app. Type <code>/mcp</code> in the message box to see connected servers; <strong>gift</strong> should be listed.</p>
+      <div class="callout warn">
+        <p><strong>ChatGPT on the web cannot use GIFt.</strong> It reaches only remote MCP servers on the internet, and GIFt runs only on your Mac. Use the desktop app.</p>
+      </div>
+
+      <h2 id="other-clients">Other clients</h2>
+      <p>Any MCP client that can start a local command works. Give it the command and the argument <code>mcp</code>.</p>
+      <h3>Claude Code</h3>
+      <p>Claude Code has a shell, so <a href="agents.html#skill">the command and the skill</a> are the better fit. To use MCP anyway:</p>
+      <pre><code><span class="k">claude</span> mcp add --scope user gift -- /Applications/GIFt.app/Contents/MacOS/GIFt mcp</code></pre>
+      <h3>Cursor</h3>
+      <span class="file-label">~/.cursor/mcp.json</span>
+      <pre><code>{
+  <span class="s">"mcpServers"</span>: {
+    <span class="s">"gift"</span>: {
+      <span class="s">"command"</span>: <span class="s">"/Applications/GIFt.app/Contents/MacOS/GIFt"</span>,
+      <span class="s">"args"</span>: [<span class="s">"mcp"</span>]
+    }
+  }
+}</code></pre>
+
+      <h2 id="tools">Tools</h2>
+      <table>
+        <thead><tr><th>Tool</th><th>What it does</th></tr></thead>
+        <tbody>
+          <tr><td><code>status</code></td><td>GIFt's state, output folder, whether Screen Recording is granted, and each display's frame and scale.</td></tr>
+          <tr><td><code>list_windows</code></td><td>Open windows, frontmost first, with the IDs <code>record</code> takes.</td></tr>
+          <tr><td><code>screenshot</code></td><td>Returns an image of an area, or the primary display, with the measurement grid drawn in. One image pixel is one screen point, so the model reads coordinates straight off the labels.</td></tr>
+          <tr><td><code>record</code></td><td>Records an area (<code>x</code>, <code>y</code>, <code>width</code>, <code>height</code>) or a window (<code>window_id</code>). With <code>seconds</code>, returns the saved file; without it, returns once recording starts. Optional <code>fps</code> and <code>format</code>.</td></tr>
+          <tr><td><code>stop_recording</code></td><td>Stops and returns the saved file, or throws the recording away with <code>discard</code>.</td></tr>
+          <tr><td><code>show_recording</code></td><td>Opens a file in Quick Look on your screen.</td></tr>
+        </tbody>
+      </table>
+      <p>Apps time out tool calls that run too long, often after 60 seconds. For longer recordings, the model can start with <code>record</code> and no <code>seconds</code>, then call <code>stop_recording</code>.</p>
+
+      <h2 id="troubleshooting">Troubleshooting</h2>
+      <h3>gift does not appear in the app</h3>
+      <ul>
+        <li>Check that the configuration file is valid JSON or TOML. One missing comma disables every server in a Claude Desktop config.</li>
+        <li>Check that the path is exactly <code>/Applications/GIFt.app/Contents/MacOS/GIFt</code>. If GIFt is somewhere else, use that location.</li>
+        <li>Quit the app completely and open it again.</li>
+        <li>Run the command in Terminal. It should wait silently for input; press <kbd>⌃</kbd> <kbd>C</kbd> to stop it.</li>
+      </ul>
+      <p>Claude Desktop writes each server's errors to <code>~/Library/Logs/Claude/mcp-server-gift.log</code>.</p>
+      <h3>Every tool says agent control is off</h3>
+      <p>Turn on <strong>Allow agents</strong> in GIFt's Settings, under Agents. The connection stays up, so the next call works without restarting the app.</p>
+      <h3>Tools say GIFt lacks Screen Recording permission</h3>
+      <p>GIFt opens its Settings window at the permission. Grant it there, let macOS reopen GIFt, and ask again. The model cannot grant it for you.</p>
+    </article>
+  </div>
+
+  <footer class="site-footer">
+    <div class="wrap">
+      <span>GIFt, made by Justin Tout.</span>
+      <nav aria-label="Footer">
+        <a href="guide.html">Guide</a>
+        <a href="agents.html">Agents</a>
+        <a href="mcp.html">MCP</a>
+        <a href="https://github.com/justintout/GIFt/releases">Releases</a>
+      </nav>
+    </div>
+  </footer>
+</body>
+</html>

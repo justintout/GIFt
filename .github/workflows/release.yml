@@ -146,9 +146,12 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ steps.target.outputs.version }}
+        # GIFt.dmg is the same file under a fixed name, so the website's download link,
+        # releases/latest/download/GIFt.dmg, always reaches the newest release.
         run: |
+          cp "dist/GIFt-${VERSION}.dmg" dist/GIFt.dmg
           gh release create "v${VERSION}" \
-            "dist/GIFt-${VERSION}.dmg" "dist/GIFt-${VERSION}.dmg.sha256" \
+            "dist/GIFt-${VERSION}.dmg" "dist/GIFt-${VERSION}.dmg.sha256" dist/GIFt.dmg \
             --title "GIFt ${VERSION}" --generate-notes --verify-tag
 
       - name: Remove the signing keychain

@@ -29,6 +29,9 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTa
     private let reviewSwitch = NSSwitch()
     private let highlightClicksSwitch = NSSwitch()
     private let launchAtLoginSwitch = NSSwitch()
+    private let agentSwitch = NSSwitch()
+    private let commandStatus = NSTextField(labelWithString: "")
+    private let installCommandButton = NSButton(title: "Install…", target: nil, action: nil)
     private let fpsPopup = NSPopUpButton()
     private let formatPopup = NSPopUpButton()
     private let shortcutRecorder = ShortcutRecorderView()
@@ -131,10 +134,10 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTa
         let browseButton = NSButton(title: "Choose…", target: self, action: #selector(browse))
         fpsPopup.addItems(withTitles: Settings.allowedFrameRates.map { "\($0) fps" })
         formatPopup.addItems(withTitles: ExportFormat.allCases.map(\.displayName))
-        for control in [autoStartSwitch, bringWindowToFrontSwitch, reviewSwitch, highlightClicksSwitch, launchAtLoginSwitch] as [NSControl] {
+        for control in [autoStartSwitch, bringWindowToFrontSwitch, reviewSwitch, highlightClicksSwitch, launchAtLoginSwitch, agentSwitch] as [NSControl] {
             control.controlSize = .small
         }
-        for control in [autoStartSwitch, bringWindowToFrontSwitch, reviewSwitch, highlightClicksSwitch, fpsPopup, formatPopup, indicatorColorWell, opacitySlider, borderWidthSlider] as [NSControl] {
+        for control in [autoStartSwitch, bringWindowToFrontSwitch, reviewSwitch, highlightClicksSwitch, agentSwitch, fpsPopup, formatPopup, indicatorColorWell, opacitySlider, borderWidthSlider] as [NSControl] {
             control.target = self
             control.action = #selector(controlChanged(_:))
         }
@@ -157,6 +160,12 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTa
             row.settingsButton.tag = index
             permissionRows.append(row)
         }
+        installCommandButton.target = self
+        installCommandButton.action = #selector(installCommand)
+        commandStatus.textColor = .secondaryLabelColor
+        let skillButton = NSButton(title: "Open Guide", target: self, action: #selector(openAgentGuide))
+        let mcpButton = NSButton(title: "Open Guide", target: self, action: #selector(openMCPGuide))
+
         setupTitle.font = .boldSystemFont(ofSize: 15)
         setupIntro.textColor = .secondaryLabelColor
 
@@ -187,6 +196,16 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTa
                     row("Color", controls: indicatorColorWell),
                     sliderRow("Fill opacity", slider: opacitySlider, valueLabel: opacityValueLabel, range: IndicatorStyle.fillOpacityRange),
                     sliderRow("Border width", slider: borderWidthSlider, valueLabel: borderWidthValueLabel, range: IndicatorStyle.borderWidthRange)
+                ])
+            ])),
+            Pane(title: "Agents", symbol: "sparkles", view: paneView([
+                section("Agents", [
+                    row("Allow agents", info: "Lets coding agents and AI apps take screenshots and record through GIFt, using the gift command or MCP. While this is on, any app running as you can do the same.", controls: agentSwitch)
+                ]),
+                section("Setup", [
+                    row("gift command", info: "Links \(AgentSetup.commandPath) to GIFt, so agents with a shell can run gift. macOS asks for your password.", controls: commandStatus, installCommandButton),
+                    row("Agent skill", info: "Teaches an agent the screenshot, grid, and record workflow. The guide shows how to add it to your agent.", controls: skillButton),
+                    row("Claude Desktop and ChatGPT", info: "AI apps without a shell connect to GIFt over MCP.", controls: mcpButton)
                 ])
             ])),
             Pane(title: "Permissions", symbol: "lock.shield", view: paneView([
@@ -521,6 +540,8 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTa
         bringWindowToFrontSwitch.state = settings.bringWindowToFront ? .on : .off
         reviewSwitch.state = settings.reviewBeforeSaving ? .on : .off
         highlightClicksSwitch.state = settings.highlightClicks ? .on : .off
+        agentSwitch.state = settings.agentControlEnabled ? .on : .off
+        updateCommandStatus()
         // Read from the system rather than stored, because the user can also change it in
         // System Settings > General > Login Items.
         launchAtLoginSwitch.state = SMAppService.mainApp.status == .enabled ? .on : .off
@@ -542,6 +563,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTa
         case bringWindowToFrontSwitch: change { $0.bringWindowToFront = on }
         case reviewSwitch: change { $0.reviewBeforeSaving = on }
         case highlightClicksSwitch: change { $0.highlightClicks = on }
+        case agentSwitch: change { $0.agentControlEnabled = on }
         case fpsPopup:
             let fps = Settings.allowedFrameRates[fpsPopup.indexOfSelectedItem]
             change { $0.defaultFPS = fps }
@@ -623,6 +645,30 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTa
         if !NSWorkspace.shared.open(permission.settingsURL) {
             NSWorkspace.shared.open(URL(fileURLWithPath: "/System/Applications/System Settings.app"))
         }
+    }
+
+    private func updateCommandStatus() {
+        let installed = AgentSetup.isCommandInstalled
+        commandStatus.stringValue = installed ? "Installed" : "Not installed"
+        installCommandButton.title = installed ? "Reinstall…" : "Install…"
+    }
+
+    @objc private func installCommand() {
+        do {
+            try AgentSetup.installCommand()
+        } catch {
+            commandStatus.stringValue = error.localizedDescription
+            return
+        }
+        updateCommandStatus()
+    }
+
+    @objc private func openAgentGuide() {
+        NSWorkspace.shared.open(AgentSetup.guideURL)
+    }
+
+    @objc private func openMCPGuide() {
+        NSWorkspace.shared.open(AgentSetup.mcpGuideURL)
     }
 
     @objc private func browse() {

@@ -16,6 +16,9 @@ struct Settings: Codable {
     var stopShortcut: KeyboardShortcut
     var defaultFPS: Int
     var indicatorStyle: IndicatorStyle
+    /// Off until the user turns it on: while on, any process running as the user can take
+    /// screenshots and record through GIFt's Screen Recording grant.
+    var agentControlEnabled: Bool
     var initialSetupVersion: Int
 
     var hasCompletedInitialSetup: Bool {
@@ -34,6 +37,7 @@ struct Settings: Codable {
         stopShortcut: .default,
         defaultFPS: defaultFrameRate,
         indicatorStyle: .default,
+        agentControlEnabled: false,
         initialSetupVersion: 0
     )
 
@@ -47,6 +51,7 @@ struct Settings: Codable {
         case stopShortcut
         case defaultFPS
         case indicatorStyle
+        case agentControlEnabled
         case initialSetupVersion
     }
 
@@ -104,6 +109,7 @@ extension Settings {
             stopShortcut: value(.stopShortcut, or: fallback.stopShortcut),
             defaultFPS: value(.defaultFPS, or: fallback.defaultFPS),
             indicatorStyle: value(.indicatorStyle, or: fallback.indicatorStyle),
+            agentControlEnabled: value(.agentControlEnabled, or: fallback.agentControlEnabled),
             initialSetupVersion: value(.initialSetupVersion, or: 0)
         )
     }

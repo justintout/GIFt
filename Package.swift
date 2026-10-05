@@ -11,6 +11,9 @@ let package = Package(
     products: [
         .executable(name: "gift", targets: ["gift"])
     ],
+    dependencies: [
+        .package(url: "https://github.com/modelcontextprotocol/swift-sdk.git", from: "0.12.1")
+    ],
     targets: [
         .target(
             name: "GiftCore",
@@ -18,7 +21,10 @@ let package = Package(
         ),
         .executableTarget(
             name: "gift",
-            dependencies: ["GiftCore"],
+            dependencies: [
+                "GiftCore",
+                .product(name: "MCP", package: "swift-sdk")
+            ],
             path: "Sources/gift",
             swiftSettings: [
                 // The AppKit surface this app drives (CGEvent taps, ScreenCaptureKit delegates,
