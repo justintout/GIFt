@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Empty box · GIFt</title>
+  <title>Return to sender · GIFt</title>
   <meta name="robots" content="noindex">
   <meta name="theme-color" content="#fcf6ea" media="(prefers-color-scheme: light)">
   <meta name="theme-color" content="#0f1a1a" media="(prefers-color-scheme: dark)">
@@ -142,25 +142,6 @@
     .note em { font-style: normal; color: #b83f25; }
     @keyframes note { from { transform: rotate(-4deg); } to { transform: rotate(7deg); } }
 
-    .stamp {
-      display: inline-block;
-      transform: rotate(-4deg);
-      border: 3px solid #b83f25;
-      color: #b83f25;
-      border-radius: 6px;
-      padding: 4px 12px;
-      font: 900 0.9rem/1 var(--font-display);
-      letter-spacing: 0.12em;
-      text-transform: uppercase;
-      background: var(--paper);
-      margin-bottom: 6px;
-    }
-    @media (prefers-color-scheme: dark) {
-      :root:not([data-theme="light"]) .stamp { color: #ff9d85; border-color: #ff9d85; }
-    }
-    :root[data-theme="dark"] .stamp { color: #ff9d85; border-color: #ff9d85; }
-
-
     @media (prefers-reduced-motion: reduce) {
       .lid, .note, .confetti i { animation: none; }
       .confetti { display: none; }
@@ -191,8 +172,7 @@
         <div class="box"><div class="ribbon"></div></div>
         <div class="note"><span>To: <em>you</em><br>From: <em>404</em></span></div>
       </div>
-      <span class="stamp">Return to sender</span>
-      <h1>This box is empty.</h1>
+      <h1>Return to sender</h1>
       <p>There's no page at this address. It may have moved, or the link has a typo. Try one of these:</p>
       <div class="links">
         <a class="download-tag" href="/"><span>Home</span></a>
