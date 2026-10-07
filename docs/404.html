@@ -25,27 +25,38 @@
     /* The scene: an opened gift box, its lid tossed up, confetti still falling, and a tag. */
     .scene { position: relative; width: 300px; height: 280px; margin-bottom: 12px; -webkit-user-select: none; user-select: none; }
 
+    /* The box from slightly above: a front face, and over it the top of the walls with the empty
+       inside showing between them. The ribbon runs down the front and over the back wall. */
     .box {
       position: absolute;
       left: 60px;
       bottom: 10px;
       width: 180px;
-      height: 130px;
-      border-radius: 6px 6px 12px 12px;
+      height: 112px;
+      border-radius: 0 0 12px 12px;
       background: linear-gradient(180deg, #1c8c8c 0%, #167676 100%);
-      box-shadow: inset 0 14px 0 rgba(0, 0, 0, 0.18), 0 18px 30px rgba(20, 60, 60, 0.25);
+      box-shadow: inset 0 3px 0 rgba(255, 255, 255, 0.14), 0 18px 30px rgba(20, 60, 60, 0.25);
     }
-    /* The empty inside, seen over the front edge. */
-    .box::before {
+    .box .rim {
+      position: absolute;
+      left: 0;
+      right: 0;
+      bottom: 100%;
+      height: 24px;
+      border-radius: 6px 6px 0 0;
+      background: #24a0a0;
+    }
+    .box .rim::before {
       content: "";
       position: absolute;
       left: 8px;
       right: 8px;
-      top: -10px;
-      height: 20px;
-      border-radius: 50%;
-      background: #0f4f4f;
+      top: 7px;
+      bottom: 0;
+      border-radius: 2px 2px 0 0;
+      background: #0b4444;
     }
+    .box .rim::after { content: ""; position: absolute; left: 50%; top: 0; width: 26px; height: 7px; margin-left: -13px; background: #ff7a5c; }
     .box .ribbon { position: absolute; left: 50%; top: 0; bottom: 0; width: 26px; margin-left: -13px; background: #ff7a5c; }
     .box .ribbon::after { content: ""; position: absolute; inset: 0 8px; background: rgba(255, 255, 255, 0.18); }
 
@@ -169,7 +180,7 @@
       <div class="scene" aria-hidden="true">
         <div class="confetti"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
         <div class="lid"><div class="bow"><i></i><i></i><b></b></div></div>
-        <div class="box"><div class="ribbon"></div></div>
+        <div class="box"><div class="rim"></div><div class="ribbon"></div></div>
         <div class="note"><span>To: <em>you</em><br>From: <em>404</em></span></div>
       </div>
       <h1>Return to sender</h1>
