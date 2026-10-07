@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://gift.justintout.com/sitemap.xml

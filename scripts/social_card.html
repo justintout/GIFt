@@ -1,0 +1,46 @@
+<!doctype html>
+<!--
+  The 1200x630 image link previews show for the docs site. It reuses the site's stylesheet and
+  hero picture. Regenerate docs/assets/social-card.png after changing it:
+
+  "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" --headless=new --hide-scrollbars \
+    --force-device-scale-factor=1 --window-size=1200,630 --virtual-time-budget=3000 \
+    --blink-settings=preferredColorScheme=1 \
+    --screenshot=docs/assets/social-card.png "file://$PWD/scripts/social_card.html"
+-->
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Nunito:wght@800;900&display=swap">
+  <link rel="stylesheet" href="../docs/assets/site.css">
+  <style>
+    html, body { width: 1200px; height: 630px; overflow: hidden; }
+    body { display: grid; grid-template-columns: 560px 1fr; align-items: center; gap: 56px; padding: 0 72px; }
+    .brand { gap: 16px; margin-bottom: 36px; }
+    .brand img { width: 72px; height: 72px; }
+    .brand span { font-size: 2.6rem; }
+    h1 { font-size: 3.7rem; margin: 0 0 22px; }
+    h1 span { color: var(--teal); }
+    p { font-size: 1.45rem; color: var(--ink-soft); margin: 0; }
+    .stage { width: 100%; }
+    /* Freeze the dot partway across, since the card is a still. */
+    .stage .window .card::after { animation: none; left: 58%; }
+  </style>
+</head>
+<body class="paper">
+  <div>
+    <div class="brand"><img src="../docs/assets/icon.png" alt=""><span>GIFt</span></div>
+    <h1>Record part of your screen as a <span>GIF</span>.</h1>
+    <p>A macOS menu bar app. Coding agents can drive it too.</p>
+  </div>
+  <div class="stage">
+    <div class="menubar"><i></i><i></i><img src="../docs/assets/icon.png" alt=""></div>
+    <div class="window">
+      <div class="bar"><b></b><b></b><b></b></div>
+      <div class="rows"><i></i><i></i><i></i></div>
+      <div class="target"><div class="card"></div><div class="controls"><b></b><b></b></div></div>
+    </div>
+    <div class="hangtag">.gif</div>
+  </div>
+</body>
+</html>
