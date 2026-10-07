@@ -80,6 +80,6 @@ scripts/build_app.sh --version 2026.10.1 --notarize
 scripts/make_dmg.sh 2026.10.1
 ```
 
-The website in `docs/` is plain HTML and CSS, served by GitHub Pages from `main`. Preview it by opening `docs/index.html` in a browser.
+The website in `docs/` is plain HTML and CSS, served by GitHub Pages from `main`. Preview it by opening `docs/index.html` in a browser. The link preview image, `docs/assets/social-card.png`, is rendered from `scripts/social_card.html`; the command to regenerate it is at the top of that file.
 
 The app icon is drawn by `scripts/make_icon.swift`; run `swift scripts/make_icon.swift` after changing it to regenerate `Packaging/AppIcon.icns`. The DMG window's wrapping-paper background is drawn the same way by `scripts/make_dmg_background.swift`, which writes `Packaging/dmg-background.png` and its `@2x` twin.
