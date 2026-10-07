@@ -252,7 +252,12 @@ strong { font-weight: 650; }
   .download-tag { transition: none; }
 }
 
-/* The hero picture: a desktop with a selection being recorded. */
+/* The hero picture: a cursor drags out an area, records a toggle flipping and a bar filling,
+   stops, and the recording flies into the .gif tag. Positions are percentages of the stage, and
+   the tag is sized in container units so it keeps its proportion at every width.
+
+   Without animation, every piece rests at a still of a recording in progress. That still is what
+   people who prefer reduced motion see, and what scripts/social_card.html renders. */
 
 .stage {
   position: relative;
@@ -262,6 +267,9 @@ strong { font-weight: 650; }
   box-shadow: var(--shadow), 0 30px 60px rgba(30, 60, 60, 0.25);
   overflow: hidden;
   border: 1px solid rgba(0, 0, 0, 0.12);
+  container-type: inline-size;
+  -webkit-user-select: none;
+  user-select: none;
 }
 .stage .menubar {
   height: 26px;
@@ -274,6 +282,8 @@ strong { font-weight: 650; }
 }
 .stage .menubar i { width: 34px; height: 7px; border-radius: 4px; background: rgba(29, 40, 39, 0.18); }
 .stage .menubar img { width: 16px; height: 16px; }
+.stage .rec { display: flex; align-items: center; gap: 4px; font: 800 9px/1 var(--font-display); letter-spacing: 0.06em; color: #b8321f; }
+.stage .rec::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: #e0412b; }
 .stage .window {
   position: absolute;
   left: 9%;
@@ -284,9 +294,6 @@ strong { font-weight: 650; }
   background: var(--paper-raised);
   box-shadow: 0 18px 40px rgba(0, 0, 0, 0.3);
   overflow: hidden;
-  /* The card takes whatever height is left, so it fits the window at any width. */
-  display: flex;
-  flex-direction: column;
 }
 .stage .window .bar { height: 24px; background: var(--kraft); display: flex; gap: 6px; align-items: center; padding-left: 10px; }
 .stage .window .bar b { width: 9px; height: 9px; border-radius: 50%; background: var(--kraft-deep); }
@@ -294,77 +301,122 @@ strong { font-weight: 650; }
 .stage .window .rows i { height: 9px; border-radius: 5px; background: var(--rule); }
 .stage .window .rows i:nth-child(2) { width: 78%; }
 .stage .window .rows i:nth-child(3) { width: 62%; }
-.stage .target { position: relative; flex: 1; min-height: 0; margin: 10px 72px 22px 22px; }
-.stage .window .card {
-  height: 100%;
-  border-radius: 10px;
-  background: var(--teal-wash);
-  border: 1px solid rgba(28, 140, 140, 0.25);
-  position: relative;
-  outline: 2.5px solid var(--coral);
-  outline-offset: 7px;
-  animation: pulse 1.6s ease-in-out infinite;
-}
-.stage .window .card::after {
-  content: "";
-  position: absolute;
-  left: 14px;
-  top: 50%;
-  height: min(28px, 60%);
-  aspect-ratio: 1;
-  translate: 0 -50%;
-  border-radius: 50%;
-  background: var(--coral);
-  animation: slide 3.2s ease-in-out infinite alternate;
-}
-/* The dot's own width is unknown here, so the end position is offset by translating it back. */
-@keyframes slide { to { left: calc(100% - 14px); translate: -100% -50%; } }
-@keyframes pulse { 50% { outline-color: #ffb39f; } }
-.stage .controls {
-  position: absolute;
-  left: calc(100% + 18px);
-  top: -7px;
-  display: grid;
-  gap: 6px;
-}
-.stage .controls b {
-  width: 26px;
-  height: 26px;
-  border-radius: 8px;
-  background: var(--paper);
-  display: grid;
-  place-items: center;
-  box-shadow: 0 3px 8px rgba(0, 0, 0, 0.2);
-}
-.stage .controls b::after { content: ""; width: 9px; height: 9px; border-radius: 2px; background: var(--coral-strong); }
-.stage .controls b:first-child::after { width: 8px; background: none; border-inline: 3px solid var(--ink); height: 10px; border-radius: 0; }
+
+/* The window content being recorded, and the copy of it that flies into the tag. */
+.stage .toggle { position: absolute; width: 9%; height: 6%; border-radius: 999px; background: var(--teal); }
+.stage .toggle::after { content: ""; position: absolute; top: 10%; left: 50%; height: 80%; aspect-ratio: 1; border-radius: 50%; background: var(--paper-raised); box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25); }
+.stage .progress { position: absolute; height: 3.5%; border-radius: 999px; background: var(--rule); overflow: hidden; }
+.stage .progress::after { content: ""; position: absolute; inset: 0 30% 0 0; background: var(--teal); }
+.stage .ui .toggle { left: 18%; top: 51%; }
+.stage .ui .progress { left: 18%; top: 64%; width: 40%; }
+.stage .shot { position: absolute; left: 14%; top: 46%; width: 50%; height: 28%; z-index: 6; border-radius: 6px; background: var(--paper-raised); box-shadow: 0 10px 24px rgba(0, 0, 0, 0.28); overflow: hidden; transform-origin: 0 0; opacity: 0; }
+.stage .shot .toggle { left: 8%; top: 18%; width: 18%; height: 21%; }
+.stage .shot .progress { left: 8%; top: 64%; width: 80%; height: 12.5%; }
+.stage .shot .progress::after { right: 0; }
+
+.stage .sel { position: absolute; left: 14%; top: 46%; width: 50%; height: 28%; z-index: 3; border: 2.5px solid var(--coral); border-radius: 4px; }
+.stage .controls { position: absolute; left: calc(64% + 10px); top: 46%; z-index: 3; display: grid; gap: 6px; }
+.stage .controls b { width: 24px; height: 24px; border-radius: 7px; background: var(--paper); display: grid; place-items: center; box-shadow: 0 3px 8px rgba(0, 0, 0, 0.2); }
+.stage .controls b::after { content: ""; width: 8px; height: 8px; border-radius: 2px; background: var(--coral-strong); }
+.stage .controls b:first-child::after { width: 7px; height: 9px; background: none; border-inline: 3px solid var(--ink); border-radius: 0; }
+.stage .ring { position: absolute; width: 30px; height: 30px; margin: -15px 0 0 -15px; z-index: 7; border: 3px solid var(--coral); border-radius: 50%; opacity: 0; }
+.stage .ring.first { left: 22.5%; top: 54%; }
+.stage .ring.second { left: calc(64% + 22px); top: calc(46% + 42px); }
+.stage .cursor { position: absolute; left: 42%; top: 66%; z-index: 9; width: 16px; height: 22px; transform-origin: 2px 2px; filter: drop-shadow(0 2px 3px rgba(0, 0, 0, 0.35)); }
+
 .stage .hangtag {
   position: absolute;
   right: 6%;
-  bottom: 7%;
+  bottom: 10%;
+  z-index: 8;
   transform: rotate(-6deg);
+  transform-origin: 0.8em 50%;
   background: #b83f25;
   color: var(--cream);
-  font: 900 1.1rem/1 var(--font-display);
-  padding: 12px 16px 12px 28px;
-  clip-path: polygon(14px 0, 100% 0, 100% 100%, 14px 100%, 0 50%);
-  border-radius: 0 8px 8px 0;
+  font: 900 5.5cqw/1 var(--font-display);
+  padding: 0.62em 0.9em 0.62em 1.6em;
+  clip-path: polygon(0.8em 0, 100% 0, 100% 100%, 0.8em 100%, 0 50%);
+  border-radius: 0 0.45em 0.45em 0;
   box-shadow: var(--shadow);
 }
 .stage .hangtag::before {
   content: "";
   position: absolute;
-  left: 13px;
+  left: 0.72em;
   top: 50%;
-  width: 7px;
-  height: 7px;
-  margin-top: -3.5px;
+  width: 0.38em;
+  height: 0.38em;
+  margin-top: -0.19em;
   border-radius: 50%;
   background: var(--cream);
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .stage .window .card, .stage .window .card::after { animation: none; }
+@media (prefers-reduced-motion: no-preference) {
+  .stage { --loop: 9s; }
+  .stage .rec { animation: hero-rec var(--loop) infinite; }
+  .stage .rec::before { animation: hero-blink 1s steps(2) infinite; }
+  .stage .ui { animation: hero-ui var(--loop) infinite; }
+  .stage .ui .toggle { animation: hero-track var(--loop) infinite; }
+  .stage .ui .toggle::after { animation: hero-knob var(--loop) infinite; }
+  .stage .ui .progress::after { animation: hero-fill var(--loop) infinite; }
+  .stage .sel { animation: hero-sel var(--loop) infinite; }
+  .stage .controls { animation: hero-controls var(--loop) infinite; }
+  .stage .ring.first { animation: hero-ring-first var(--loop) infinite; }
+  .stage .ring.second { animation: hero-ring-second var(--loop) infinite; }
+  .stage .cursor { animation: hero-cursor var(--loop) infinite; }
+  .stage .shot { animation: hero-shot var(--loop) infinite; }
+  .stage .hangtag { animation: hero-tag var(--loop) infinite; }
+}
+
+@keyframes hero-blink { 50% { opacity: 0.2; } }
+@keyframes hero-cursor {
+  0% { left: 92%; top: 96%; opacity: 0; transform: scale(1); }
+  4% { opacity: 1; }
+  10% { left: 14%; top: 46%; transform: scale(1); }
+  12% { left: 14%; top: 46%; transform: scale(0.85); }
+  28% { left: 64%; top: 74%; transform: scale(0.85); }
+  29% { transform: scale(1); }
+  33% { left: 22.5%; top: 54%; transform: scale(1); }
+  36% { left: 22.5%; top: 54%; transform: scale(0.85); }
+  38% { transform: scale(1); }
+  46% { left: 42%; top: 66%; }
+  60% { left: calc(64% + 22px); top: calc(46% + 42px); transform: scale(1); }
+  65% { transform: scale(0.85); }
+  67% { left: calc(64% + 22px); top: calc(46% + 42px); transform: scale(1); }
+  74% { left: 90%; top: 94%; opacity: 1; }
+  78%, 100% { left: 92%; top: 96%; opacity: 0; }
+}
+@keyframes hero-sel {
+  0%, 9% { width: 0; height: 0; opacity: 0; border-style: dashed; }
+  10% { width: 0; height: 0; opacity: 1; border-style: dashed; }
+  28% { width: 50%; height: 28%; border-style: dashed; }
+  30%, 68% { width: 50%; height: 28%; opacity: 1; border-style: solid; }
+  70%, 100% { width: 50%; height: 28%; opacity: 0; border-style: solid; }
+}
+@keyframes hero-rec { 0%, 29% { opacity: 0; } 30%, 66% { opacity: 1; } 68%, 100% { opacity: 0; } }
+@keyframes hero-controls { 0%, 29% { opacity: 0; } 32%, 66% { opacity: 1; } 69%, 100% { opacity: 0; } }
+@keyframes hero-ui { 0%, 88% { opacity: 1; } 92%, 96% { opacity: 0; } 100% { opacity: 1; } }
+@keyframes hero-track { 0%, 36% { background: var(--rule); } 37%, 93% { background: var(--teal); } 94%, 100% { background: var(--rule); } }
+@keyframes hero-knob { 0%, 36% { left: 6%; } 38%, 93% { left: 50%; } 94%, 100% { left: 6%; } }
+@keyframes hero-fill { 0%, 40% { right: 100%; } 60%, 93% { right: 0; } 94%, 100% { right: 100%; } }
+@keyframes hero-ring-first { 0%, 35% { opacity: 0; transform: scale(0.3); } 36% { opacity: 1; transform: scale(0.4); } 43%, 100% { opacity: 0; transform: scale(1.6); } }
+@keyframes hero-ring-second { 0%, 64% { opacity: 0; transform: scale(0.3); } 65% { opacity: 1; transform: scale(0.4); } 72%, 100% { opacity: 0; transform: scale(1.6); } }
+/* The copy lifts off the window, then shrinks onto the tag's spot: its top left lands on the tag's
+   top left, about (68%, 74%) of the stage, at the tag's width. */
+@keyframes hero-shot {
+  0%, 67% { opacity: 0; transform: translate(0, 0) scale(1); }
+  69%, 72% { opacity: 1; transform: translate(-1%, -4%) scale(1.03); }
+  82% { opacity: 1; transform: translate(108%, 99%) scale(0.52); }
+  84%, 100% { opacity: 0; transform: translate(108%, 99%) scale(0.52); }
+}
+@keyframes hero-tag {
+  0%, 81% { transform: rotate(-30deg) scale(0); opacity: 1; }
+  84% { transform: rotate(-16deg) scale(1.1); }
+  87% { transform: rotate(8deg) scale(1); }
+  90% { transform: rotate(-12deg) scale(1); }
+  93% { transform: rotate(2deg) scale(1); }
+  96% { transform: rotate(-6deg) scale(1); opacity: 1; }
+  100% { transform: rotate(-6deg) scale(1); opacity: 0; }
 }
 
 /* Sections */
@@ -581,7 +633,6 @@ kbd {
   .features, .cards, .steps.row { grid-template-columns: 1fr; }
   .hero { padding: 44px 0 56px; }
   .stage .window .rows { padding: 12px; gap: 8px; }
-  .stage .target { margin: 8px 56px 16px 18px; }
   .section { padding: 56px 0; }
   .site-footer nav { margin-left: 0; }
 }
