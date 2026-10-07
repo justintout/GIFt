@@ -9,7 +9,7 @@
   --rule: #e2d3b6;
   --ink: #1d2827;
   --ink-soft: #4d5856;
-  --ink-faint: #7a817c;
+  --ink-faint: #5c6460;
   --teal: #1c8c8c;
   --teal-strong: #136b6b;
   --teal-wash: rgba(28, 140, 140, 0.1);
@@ -50,8 +50,8 @@
     --coral: #ff8a6e;
     --coral-strong: #ff9d85;
     --coral-wash: rgba(255, 138, 110, 0.14);
-    --button: #1a7f7e;
-    --button-hover: #1f9190;
+    --button: #187675;
+    --button-hover: #1c8584;
     --code-bg: #0a1414;
     --stripe: rgba(63, 179, 176, 0.07);
     --dot: rgba(255, 138, 110, 0.32);
@@ -75,8 +75,8 @@
   --coral: #ff8a6e;
   --coral-strong: #ff9d85;
   --coral-wash: rgba(255, 138, 110, 0.14);
-  --button: #1a7f7e;
-  --button-hover: #1f9190;
+  --button: #187675;
+  --button-hover: #1c8584;
   --code-bg: #0a1414;
   --stripe: rgba(63, 179, 176, 0.07);
   --dot: rgba(255, 138, 110, 0.32);
@@ -343,7 +343,7 @@ strong { font-weight: 650; }
   right: 6%;
   bottom: 7%;
   transform: rotate(-6deg);
-  background: var(--coral);
+  background: #b83f25;
   color: var(--cream);
   font: 900 1.1rem/1 var(--font-display);
   padding: 12px 16px 12px 28px;
@@ -428,7 +428,7 @@ strong { font-weight: 650; }
   border-radius: 50%;
   display: grid;
   place-items: center;
-  background: var(--teal-strong);
+  background: var(--button);
   color: var(--cream);
   font: 900 0.95rem/1 var(--font-display);
 }
